@@ -1,18 +1,16 @@
 import { supabaseAdmin, THERAPIST_ID } from '@/lib/supabase'
 import Link from 'next/link'
-import { notFound } from 'next/navigation'
 
 export const revalidate = 0
+export const dynamic = 'force-dynamic'
 
 async function getPatient(id: string) {
-  console.log('Fetching patient:', id, 'therapist:', THERAPIST_ID)
-  
   const { data, error } = await supabaseAdmin
     .from('therapai_patients')
     .select(`
       id, name, notes, created_at,
       therapai_sessions (
-        id, session_date, status, duration_min,
+        id, session_date, status,
         therapai_analyses (id, analysis_md, session_number)
       ),
       therapai_longitudinal (
@@ -21,10 +19,10 @@ async function getPatient(id: string) {
     `)
     .eq('therapist_id', THERAPIST_ID)
     .eq('id', id)
-    .single()
+    .limit(1)
 
-  console.log('Patient result:', JSON.stringify({ data: data?.name, error }))
-  return data
+  if (error || !data || data.length === 0) return null
+  return data[0]
 }
 
 function MarkdownViewer({ md }: { md: string }) {
@@ -34,34 +32,35 @@ function MarkdownViewer({ md }: { md: string }) {
     .replace(/^### (.+)$/gm, '<h3 class="text-base font-semibold text-slate-700 mt-4 mb-1">$1</h3>')
     .replace(/^#### (.+)$/gm, '<h4 class="text-sm font-semibold text-slate-600 mt-3 mb-1">$1</h4>')
     .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
-    .replace(/\*(.+?)\*/g, '<em>$1</em>')
-    .replace(/^- (.+)$/gm, '<li class="ml-4 text-slate-700">$1</li>')
+    .replace(/^- (.+)$/gm, '<li class="ml-4 text-slate-700 list-disc">$1</li>')
     .replace(/^---$/gm, '<hr class="border-slate-200 my-4">')
-    .replace(/\n\n/g, '</p><p class="text-slate-700 text-sm leading-relaxed mb-2">')
+    .replace(/\n\n/g, '<br/><br/>')
   return (
     <div
-      className="prose prose-sm max-w-none text-slate-700 text-sm leading-relaxed"
-      dangerouslySetInnerHTML={{ __html: `<p class="text-slate-700 text-sm leading-relaxed mb-2">${html}</p>` }}
+      className="text-slate-700 text-sm leading-relaxed"
+      dangerouslySetInnerHTML={{ __html: html }}
     />
   )
 }
 
 export default async function PatientPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params
-  console.log('PatientPage rendering for id:', id)
-  
   const patient = await getPatient(id)
-  
+
   if (!patient) {
-    console.log('Patient not found, returning 404')
-    notFound()
+    return (
+      <div className="text-center py-20">
+        <p className="text-slate-500">Paciente não encontrado.</p>
+        <Link href="/" className="text-indigo-600 text-sm mt-4 inline-block">← Voltar</Link>
+      </div>
+    )
   }
 
   const sessions = [...(patient.therapai_sessions ?? [])].sort(
-    (a, b) => new Date(b.session_date).getTime() - new Date(a.session_date).getTime()
+    (a: any, b: any) => new Date(b.session_date).getTime() - new Date(a.session_date).getTime()
   )
-  const longitudinal = patient.therapai_longitudinal?.[0]
-  const analysedCount = sessions.filter((s: any) => s.therapai_analyses?.length).length
+  const longitudinal = (patient.therapai_longitudinal ?? [])[0]
+  const analysedCount = sessions.filter((s: any) => s.therapai_analyses?.length > 0).length
 
   return (
     <div>
@@ -93,11 +92,10 @@ export default async function PatientPage({ params }: { params: Promise<{ id: st
                 <div key={s.id} className={`rounded-lg border p-3 ${hasAnalysis ? 'border-slate-200 bg-white' : 'border-slate-100 bg-slate-50'}`}>
                   <div className="flex items-center justify-between">
                     <span className="text-sm font-medium text-slate-700">{s.session_date}</span>
-                    {hasAnalysis ? (
-                      <span className="text-xs text-green-600 bg-green-50 px-2 py-0.5 rounded-full border border-green-200">Analisada</span>
-                    ) : (
-                      <span className="text-xs text-slate-400 bg-slate-100 px-2 py-0.5 rounded-full">Pendente</span>
-                    )}
+                    {hasAnalysis
+                      ? <span className="text-xs text-green-600 bg-green-50 px-2 py-0.5 rounded-full border border-green-200">Analisada</span>
+                      : <span className="text-xs text-slate-400 bg-slate-100 px-2 py-0.5 rounded-full">Pendente</span>
+                    }
                   </div>
                 </div>
               )
@@ -122,7 +120,9 @@ export default async function PatientPage({ params }: { params: Promise<{ id: st
             <div key={s.id} className="bg-white rounded-xl border border-slate-200 p-6">
               <h2 className="text-base font-semibold text-slate-900 mb-4">
                 Análise — {s.session_date}
-                <span className="ml-2 text-xs text-slate-400 font-normal">Sessão nº {s.therapai_analyses[0].session_number}</span>
+                <span className="ml-2 text-xs text-slate-400 font-normal">
+                  Sessão nº {s.therapai_analyses[0].session_number}
+                </span>
               </h2>
               <MarkdownViewer md={s.therapai_analyses[0].analysis_md ?? ''} />
             </div>
