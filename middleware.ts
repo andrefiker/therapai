@@ -21,9 +21,23 @@ export async function middleware(request: NextRequest) {
     }
   )
 
-  await supabase.auth.getUser()
+  const { data: { user } } = await supabase.auth.getUser()
 
-  // Auth temporarily disabled for testing — remove this before going live
+  const pathname = request.nextUrl.pathname
+
+  const isPublic =
+    pathname.startsWith('/login') ||
+    pathname.startsWith('/api/auth') ||
+    pathname.startsWith('/api/webhook') ||
+    pathname.startsWith('/_next') ||
+    pathname.startsWith('/favicon')
+
+  if (isPublic) return supabaseResponse
+
+  if (!user) {
+    return NextResponse.redirect(new URL('/login', request.url))
+  }
+
   return supabaseResponse
 }
 
