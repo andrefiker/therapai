@@ -70,8 +70,10 @@ interface FirefliesTranscript {
 
 interface FirefliesWebhookPayload {
   meetingId?: string;
+  meeting_id?: string;
   transcriptId?: string;
   eventType?: string;
+  event?: string;
 }
 
 // ─── Prompts (Brazilian Portuguese, behaviorism + RFT) ────────────────────────
@@ -126,7 +128,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     return NextResponse.json({ error: 'invalid_json' }, { status: 400 });
   }
 
-  const firefliesId = payload.transcriptId ?? payload.meetingId;
+  const firefliesId = payload.transcriptId ?? payload.meetingId ?? payload.meeting_id;
   if (!firefliesId) {
     return NextResponse.json({ error: 'missing_transcript_id' }, { status: 400 });
   }
