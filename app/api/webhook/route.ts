@@ -108,11 +108,15 @@ Seções obrigatórias:
 
 // ─── Webhook entry point ──────────────────────────────────────────────────────
 export async function POST(req: NextRequest): Promise<NextResponse> {
-  // 1. Authenticate the webhook via shared secret.
-  const provided = req.headers.get('x-fireflies-secret');
-  if (!provided || provided !== FIREFLIES_WEBHOOK_SECRET) {
-    return NextResponse.json({ error: 'unauthorized' }, { status: 401 });
-  }
+    // 1. Authenticate via shared secret. Accept from query param ?secret=
+    //    (Fireflies webhook URL embedding -- V1 default) OR X-Fireflies-Secret
+    //    header (manual tests). HMAC verification is Phase 2 per D7.
+    const providedQuery = req.nextUrl.searchParams.get('secret');
+    const providedHeader = req.headers.get('x-fireflies-secret');
+    const provided = providedQuery ?? providedHeader;
+    if (!provided || provided !== FIREFLIES_WEBHOOK_SECRET) {
+          return NextResponse.json({ error: 'unauthorized' }, { status: 401 });
+    }
 
   // 2. Parse payload.
   let payload: FirefliesWebhookPayload;
