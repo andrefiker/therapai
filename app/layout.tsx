@@ -1,15 +1,20 @@
 import type { Metadata } from 'next'
 import { Inter } from 'next/font/google'
 import './globals.css'
+import { createSupabaseServer } from '@/lib/supabase'
+import LogoutButton from '@/components/LogoutButton'
 
 const inter = Inter({ subsets: ['latin'] })
 
 export const metadata: Metadata = {
   title: 'TherapAI',
-  description: 'Clinical transcript analysis pipeline',
+  description: 'Análise clínica automatizada',
 }
 
-export default function RootLayout({ children }: { children: React.ReactNode }) {
+export default async function RootLayout({ children }: { children: React.ReactNode }) {
+  const supabase = await createSupabaseServer()
+  const { data: { user } } = await supabase.auth.getUser()
+
   return (
     <html lang="pt-BR">
       <body className={inter.className}>
@@ -22,10 +27,12 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
                 </div>
                 <span className="font-semibold text-slate-900 text-lg">TherapAI</span>
               </a>
-              <div className="flex items-center gap-1 text-sm text-slate-500">
-                <span className="w-2 h-2 bg-green-400 rounded-full inline-block"></span>
-                André Fiker
-              </div>
+              {user && (
+                <div className="flex items-center gap-4">
+                  <span className="text-sm text-slate-500">{user.email}</span>
+                  <LogoutButton />
+                </div>
+              )}
             </div>
           </nav>
           <main className="max-w-6xl mx-auto px-6 py-8">
