@@ -23,11 +23,19 @@ export async function middleware(request: NextRequest) {
 
   const { data: { user } } = await supabase.auth.getUser()
 
-  const isPublic = request.nextUrl.pathname.startsWith('/login') ||
-    request.nextUrl.pathname.startsWith('/api/auth') ||
-    request.nextUrl.pathname.startsWith('/api/webhook')
+  const pathname = request.nextUrl.pathname
 
-  if (!user && !isPublic) {
+  // Always allow these through
+  const isPublic =
+    pathname.startsWith('/login') ||
+    pathname.startsWith('/api/auth') ||
+    pathname.startsWith('/api/webhook') ||
+    pathname.startsWith('/_next') ||
+    pathname.startsWith('/favicon')
+
+  if (isPublic) return supabaseResponse
+
+  if (!user) {
     return NextResponse.redirect(new URL('/login', request.url))
   }
 
