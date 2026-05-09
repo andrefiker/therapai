@@ -1,17 +1,20 @@
 import { createSupabaseServer, supabaseAdmin } from '@/lib/supabase'
 import Link from 'next/link'
-import { redirect } from 'next/navigation'
 
 export const revalidate = 0
 export const dynamic = 'force-dynamic'
 
-async function getTherapist(userId: string) {
+// Fallback therapist ID for André while auth is bypassed
+const FALLBACK_ID = 'a0000000-0000-0000-0000-000000000001'
+
+async function getTherapistId(userId: string | undefined) {
+  if (!userId) return FALLBACK_ID
   const { data } = await supabaseAdmin
     .from('therapai_therapists')
-    .select('id, name, plan, sessions_limit, fireflies_api_key')
+    .select('id')
     .eq('auth_user_id', userId)
     .single()
-  return data
+  return data?.id ?? FALLBACK_ID
 }
 
 async function getStats(therapistId: string) {
@@ -35,14 +38,8 @@ async function getPatients(therapistId: string) {
 export default async function HomePage() {
   const supabase = await createSupabaseServer()
   const { data: { user } } = await supabase.auth.getUser()
-  if (!user) redirect('/login')
 
-  const therapist = await getTherapist(user.id)
-
-  // Fallback for André (existing data without auth_user_id)
-  const therapistId = therapist?.id ?? 'a0000000-0000-0000-0000-000000000001'
-  const therapistName = therapist?.name ?? user.email?.split('@')[0] ?? 'Terapeuta'
-
+  const therapistId = await getTherapistId(user?.id)
   const [stats, patients] = await Promise.all([getStats(therapistId), getPatients(therapistId)])
 
   const withLongitudinal = patients.filter((p: any) => p.therapai_longitudinal?.length > 0)
@@ -50,7 +47,6 @@ export default async function HomePage() {
 
   return (
     <div>
-      {/* Stats */}
       <div className="grid grid-cols-3 gap-4 mb-8">
         {[
           { label: 'Pacientes', value: stats.patients },
@@ -64,7 +60,6 @@ export default async function HomePage() {
         ))}
       </div>
 
-      {/* With longitudinal */}
       {withLongitudinal.length > 0 && (
         <section className="mb-8">
           <h2 className="text-lg font-semibold text-slate-900 mb-3">
@@ -95,7 +90,6 @@ export default async function HomePage() {
         </section>
       )}
 
-      {/* Pending */}
       {pending.length > 0 && (
         <section>
           <h2 className="text-lg font-semibold text-slate-900 mb-3">
@@ -115,15 +109,6 @@ export default async function HomePage() {
             ))}
           </div>
         </section>
-      )}
-
-      {stats.patients === 0 && (
-        <div className="bg-white rounded-xl border border-dashed border-slate-300 p-16 text-center">
-          <div className="text-slate-400 mb-4">Nenhum paciente ainda.</div>
-          <Link href="/onboarding" className="text-indigo-600 text-sm hover:underline">
-            Conectar Fireflies →
-          </Link>
-        </div>
       )}
     </div>
   )

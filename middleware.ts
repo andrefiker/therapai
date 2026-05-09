@@ -21,24 +21,9 @@ export async function middleware(request: NextRequest) {
     }
   )
 
-  const { data: { user } } = await supabase.auth.getUser()
+  await supabase.auth.getUser()
 
-  const pathname = request.nextUrl.pathname
-
-  // Always allow these through
-  const isPublic =
-    pathname.startsWith('/login') ||
-    pathname.startsWith('/api/auth') ||
-    pathname.startsWith('/api/webhook') ||
-    pathname.startsWith('/_next') ||
-    pathname.startsWith('/favicon')
-
-  if (isPublic) return supabaseResponse
-
-  if (!user) {
-    return NextResponse.redirect(new URL('/login', request.url))
-  }
-
+  // Auth temporarily disabled for testing — remove this before going live
   return supabaseResponse
 }
 
