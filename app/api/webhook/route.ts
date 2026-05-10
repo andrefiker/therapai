@@ -134,6 +134,14 @@ Regras:
     "presente": <true/false>,
     "tipo": "<suicida / heteroagressivo / autolesivo / null>",
     "manejo": "<conduta tomada ou null>"
+  },
+  "medicacao": {
+    "em_uso": [
+      { "nome": "<nome ou classe>", "dose": "<dose ou null>", "indicacao": "<para que ou null>" }
+    ],
+    "mudancas_relatadas": ["<descrição curta de cada mudança discutida ou null>"],
+    "adesao_nota": "<observação sobre adesão ou null>",
+    "efeitos_relatados": ["<efeito colateral ou subjetivo mencionado ou null>"]
   }
 }
 \`\`\``;
@@ -167,7 +175,34 @@ ESTRUTURA POR EVENTO (replicar para cada um dos 3-7):
 
 PADRÕES TRANSVERSAIS (após os eventos): 1-3 padrões que aparecem em múltiplos eventos da mesma sessão. Não invente padrões que aparecem apenas uma vez.
 
-CONTAGEM FINAL: Termine com "**Eventos analisados:** N" para o N entre 3 e 7.`;
+CONTAGEM FINAL: depois dos padrões, escreva "**Eventos analisados:** N" para o N entre 3 e 7.
+
+ANEXO ESTRUTURADO OBRIGATÓRIO (D16/F2+F5 V2 — extração programática de estado):
+Após a contagem final, emita um bloco JSON fenced (\`\`\`json ... \`\`\`) sumarizando cada evento de forma processável. Este bloco alimenta o sistema de memória clínica longitudinal — não duplica os parágrafos acima, comprime-os em sinal.
+
+Regras:
+- Um item de array por evento, na MESMA ordem da narrativa acima.
+- \`null\` quando não houver sinal — NÃO invente.
+- \`frame_rft_principal\`: única moldura RFT predominante no evento. Vocabulário fechado: \`avaliacao\`, \`identidade\`, \`temporal\`, \`causal\`, \`coerencia\`, \`transformacao_funcao\`, \`null\`.
+- \`tipo_evento\`: classificação funcional do evento. Vocabulário fechado: \`esquiva_experiencial\`, \`aproximacao\`, \`derivacao_relacional\`, \`ruptura_alianca\`, \`reparo_alianca\`, \`fortalecimento_alianca\`, \`insight\`, \`validacao_fora_frame\`, \`resistencia\`, \`coragem_clinica\`, \`outro\`.
+- \`sinal_alianca\`: presença de sinal de aliança terapêutica neste evento, mesmo que não seja o tipo principal. Vocabulário fechado: \`ruptura\`, \`tensao\`, \`reparo\`, \`fortalecimento\`, \`null\`.
+- \`citacao_chave\`: fala mais clínica do paciente neste evento, palavra por palavra (curta, ≤120 caracteres). Sem timestamp na string.
+- \`timestamp\`: \`mm:ss\` correspondente à citacao_chave.
+
+\`\`\`json
+{
+  "eventos_estruturados": [
+    {
+      "evento_n": 1,
+      "tipo_evento": "<vocabulário fechado>",
+      "frame_rft_principal": "<vocabulário fechado ou null>",
+      "sinal_alianca": "<vocabulário fechado ou null>",
+      "citacao_chave": "<≤120 chars>",
+      "timestamp": "<mm:ss>"
+    }
+  ]
+}
+\`\`\``;
 
 const LONGITUDINAL_SYSTEM_PROMPT = `Você é um clínico especialista em Análise do Comportamento e RFT.
 Análise longitudinal rigorosa, em português brasileiro técnico, sintetizando todas as sessões anteriores deste paciente.
@@ -837,7 +872,147 @@ function deriveAssertions(prontuario: unknown): AssertionInsert[] {
     });
   }
 
+  const medicacao = p.medicacao as Record<string, unknown> | undefined;
+  if (medicacao && typeof medicacao === 'object') {
+    const emUso = Array.isArray(medicacao.em_uso) ? medicacao.em_uso : [];
+    for (const item of emUso) {
+      if (!item || typeof item !== 'object') continue;
+      const m = item as Record<string, unknown>;
+      const nome = typeof m.nome === 'string' ? m.nome.trim() : '';
+      if (!nome || nome.toLowerCase() === 'null') continue;
+      const dose = typeof m.dose === 'string' && m.dose.trim().toLowerCase() !== 'null' ? m.dose.trim() : null;
+      const indicacao = typeof m.indicacao === 'string' && m.indicacao.trim().toLowerCase() !== 'null' ? m.indicacao.trim() : null;
+      const text = [nome, dose && `(${dose})`, indicacao && `— ${indicacao}`].filter(Boolean).join(' ');
+      out.push({
+        dimension: 'medication',
+        sub_key: nome.toLowerCase().replace(/\s+/g, '_').slice(0, 64),
+        assertion_text: text,
+        structured_value: { nome, dose, indicacao, status: 'em_uso' },
+      });
+    }
+    const mudancas = Array.isArray(medicacao.mudancas_relatadas) ? medicacao.mudancas_relatadas : [];
+    for (let i = 0; i < mudancas.length; i++) {
+      const v = mudancas[i];
+      if (typeof v !== 'string' || !v.trim() || v.trim().toLowerCase() === 'null') continue;
+      out.push({
+        dimension: 'medication',
+        sub_key: `mudanca_${i}`,
+        assertion_text: v.trim(),
+        structured_value: { kind: 'mudanca' },
+      });
+    }
+    const efeitos = Array.isArray(medicacao.efeitos_relatados) ? medicacao.efeitos_relatados : [];
+    for (let i = 0; i < efeitos.length; i++) {
+      const v = efeitos[i];
+      if (typeof v !== 'string' || !v.trim() || v.trim().toLowerCase() === 'null') continue;
+      out.push({
+        dimension: 'medication',
+        sub_key: `efeito_${i}`,
+        assertion_text: v.trim(),
+        structured_value: { kind: 'efeito_relatado' },
+      });
+    }
+    const adesao = typeof medicacao.adesao_nota === 'string' ? medicacao.adesao_nota.trim() : '';
+    if (adesao && adesao.toLowerCase() !== 'null') {
+      out.push({
+        dimension: 'medication',
+        sub_key: 'adesao',
+        assertion_text: `Adesão: ${adesao}`,
+        structured_value: { kind: 'adesao_nota' },
+      });
+    }
+  }
+
   return out;
+}
+
+// D30/F2+F5 V2 — parse the molecular structured-events JSON appendix into
+// per-event alliance_event and relational_frame assertions.
+const FRAME_RFT_VOCAB = new Set(['avaliacao', 'identidade', 'temporal', 'causal', 'coerencia', 'transformacao_funcao']);
+const ALIANCA_VOCAB = new Set(['ruptura', 'tensao', 'reparo', 'fortalecimento']);
+const TIPO_ALIANCA_DERIVADO = new Set(['ruptura_alianca', 'reparo_alianca', 'fortalecimento_alianca']);
+
+function deriveMolecularAssertions(molecular: unknown): AssertionInsert[] {
+  if (!molecular || typeof molecular !== 'object') return [];
+  const m = molecular as Record<string, unknown>;
+  const eventos = Array.isArray(m.eventos_estruturados) ? m.eventos_estruturados : [];
+  const out: AssertionInsert[] = [];
+
+  for (const raw of eventos) {
+    if (!raw || typeof raw !== 'object') continue;
+    const ev = raw as Record<string, unknown>;
+    const n = typeof ev.evento_n === 'number' && Number.isFinite(ev.evento_n) ? ev.evento_n : null;
+    const tipo = typeof ev.tipo_evento === 'string' ? ev.tipo_evento.trim() : '';
+    const frame = typeof ev.frame_rft_principal === 'string' ? ev.frame_rft_principal.trim() : '';
+    const aliancaField = typeof ev.sinal_alianca === 'string' ? ev.sinal_alianca.trim() : '';
+    const citacao = typeof ev.citacao_chave === 'string' ? ev.citacao_chave.trim() : '';
+    const ts = typeof ev.timestamp === 'string' ? ev.timestamp.trim() : '';
+    if (n === null) continue;
+
+    if (frame && FRAME_RFT_VOCAB.has(frame)) {
+      const exemplo = citacao ? ` — "${citacao}"${ts ? ` [${ts}]` : ''}` : '';
+      out.push({
+        dimension: 'relational_frame',
+        sub_key: `evt${n}_${frame}`,
+        assertion_text: `Moldura ${frame} engajada no evento ${n}${exemplo}`,
+        structured_value: { evento_n: n, frame, citacao: citacao || null, timestamp: ts || null, tipo_evento: tipo || null },
+      });
+    }
+
+    let sinalAlianca: string | null = null;
+    if (aliancaField && ALIANCA_VOCAB.has(aliancaField)) {
+      sinalAlianca = aliancaField;
+    } else if (TIPO_ALIANCA_DERIVADO.has(tipo)) {
+      sinalAlianca = tipo.replace('_alianca', '');
+    }
+    if (sinalAlianca) {
+      const trecho = citacao ? ` — "${citacao}"${ts ? ` [${ts}]` : ''}` : '';
+      out.push({
+        dimension: 'alliance_event',
+        sub_key: `evt${n}_${sinalAlianca}`,
+        assertion_text: `Aliança — ${sinalAlianca} no evento ${n}${trecho}`,
+        structured_value: { evento_n: n, sinal: sinalAlianca, tipo_evento: tipo || null, citacao: citacao || null, timestamp: ts || null },
+      });
+    }
+  }
+
+  return out;
+}
+
+async function extractAndSaveMolecularAssertions(
+  supabase: SupabaseClient,
+  sessionId: string,
+  patientId: string,
+  molecularMd: string,
+): Promise<void> {
+  const molecular = extractFencedJson(molecularMd);
+  if (!molecular) {
+    console.log('[webhook][assertions] no molecular JSON appendix found; skipping molecular extraction');
+    return;
+  }
+  const assertions = deriveMolecularAssertions(molecular);
+  if (assertions.length === 0) {
+    console.log('[webhook][assertions] molecular JSON parsed but produced 0 assertions');
+    return;
+  }
+  const rows = assertions.map((a) => ({
+    patient_id: patientId,
+    therapist_id: ANDRE_THERAPIST_ID,
+    source_session_id: sessionId,
+    dimension: a.dimension,
+    sub_key: a.sub_key,
+    assertion_text: a.assertion_text,
+    structured_value: a.structured_value,
+    confidence: null,
+    source_kind: 'webhook_molecular_json',
+    model_emitted: null,
+    requires_confirmation: true,
+  }));
+  const { error } = await supabase.from('therapai_patient_memory_assertions').insert(rows);
+  if (error) {
+    throw new Error(`molecular_assertions_insert_failed: ${error.message}`);
+  }
+  console.log(`[webhook][assertions] inserted ${rows.length} pending molecular assertions for session ${sessionId}`);
 }
 
 async function extractAndSaveAssertions(
@@ -930,6 +1105,14 @@ async function runAndSaveMolecular(
 
   if (error) {
     throw new Error(`molecular_save_failed: ${error.message ?? 'unknown'}`);
+  }
+
+  // F2+F5 V2 — extract alliance_event + relational_frame from molecular JSON appendix.
+  // Best-effort; molecular save above is the durable artifact.
+  try {
+    await extractAndSaveMolecularAssertions(supabase, sessionId, patientId, result.text);
+  } catch (err) {
+    console.error('[webhook] molecular assertion extraction failed (non-fatal)', err);
   }
 }
 
