@@ -1,43 +1,35 @@
-import { createSupabaseServer, supabaseAdmin } from '@/lib/supabase'
+import { createSupabaseServer } from '@/lib/supabase'
+import { SupabaseClient } from '@supabase/supabase-js'
 import Link from 'next/link'
 
 export const revalidate = 0
 export const dynamic = 'force-dynamic'
 
-// Post-D20 RLS migration: therapai_therapists.id IS auth.users.id by design.
-// No DB lookup needed — userId from auth.getUser() is the therapist id directly.
-// Middleware redirects unauthenticated requests to /login, so userId is normally set;
-// FALLBACK_ID retained only as defense-in-depth for the unreachable-by-design path.
-const FALLBACK_ID = '60fdab49-c4dd-45cc-9e2b-51bec3504d35'
+// Post-D20 RLS migration: queries run via the authenticated server client.
+// RLS policies (therapist_id = auth.uid()) filter automatically — no app-layer
+// .eq('therapist_id', X) needed. Middleware redirects unauthenticated requests
+// to /login before this page renders.
 
-async function getTherapistId(userId: string | undefined) {
-  return userId ?? FALLBACK_ID
-}
-
-async function getStats(therapistId: string) {
+async function getStats(supabase: SupabaseClient) {
   const [patients, sessions, analyses] = await Promise.all([
-    supabaseAdmin.from('therapai_patients').select('id', { count: 'exact' }).eq('therapist_id', therapistId),
-    supabaseAdmin.from('therapai_sessions').select('id', { count: 'exact' }).eq('therapist_id', therapistId),
-    supabaseAdmin.from('therapai_analyses').select('id', { count: 'exact' }).eq('therapist_id', therapistId),
+    supabase.from('therapai_patients').select('id', { count: 'exact', head: true }),
+    supabase.from('therapai_sessions').select('id', { count: 'exact', head: true }),
+    supabase.from('therapai_analyses').select('id', { count: 'exact', head: true }),
   ])
   return { patients: patients.count ?? 0, sessions: sessions.count ?? 0, analyses: analyses.count ?? 0 }
 }
 
-async function getPatients(therapistId: string) {
-  const { data } = await supabaseAdmin
+async function getPatients(supabase: SupabaseClient) {
+  const { data } = await supabase
     .from('therapai_patients')
     .select(`id, name, therapai_sessions(id, session_date, status), therapai_longitudinal(sessions_count, period_start, period_end)`)
-    .eq('therapist_id', therapistId)
     .order('name')
   return data ?? []
 }
 
 export default async function HomePage() {
   const supabase = await createSupabaseServer()
-  const { data: { user } } = await supabase.auth.getUser()
-
-  const therapistId = await getTherapistId(user?.id)
-  const [stats, patients] = await Promise.all([getStats(therapistId), getPatients(therapistId)])
+  const [stats, patients] = await Promise.all([getStats(supabase), getPatients(supabase)])
 
   const withLongitudinal = patients.filter((p: any) => p.therapai_longitudinal?.length > 0)
   const pending = patients.filter((p: any) => !p.therapai_longitudinal?.length)

@@ -1,11 +1,13 @@
-import { supabaseAdmin, THERAPIST_ID } from '@/lib/supabase'
+import { createSupabaseServer } from '@/lib/supabase'
 import Link from 'next/link'
 
 export const revalidate = 0
 export const dynamic = 'force-dynamic'
 
+// Post-D20 RLS: query via authenticated server client; RLS filters by therapist_id automatically.
 async function getPatient(id: string) {
-  const { data, error } = await supabaseAdmin
+  const supabase = await createSupabaseServer()
+  const { data, error } = await supabase
     .from('therapai_patients')
     .select(`
       id, name, notes, created_at,
@@ -17,7 +19,6 @@ async function getPatient(id: string) {
         id, report_md, sessions_count, period_start, period_end, updated_at
       )
     `)
-    .eq('therapist_id', THERAPIST_ID)
     .eq('id', id)
     .limit(1)
 

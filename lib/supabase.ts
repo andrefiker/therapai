@@ -27,8 +27,9 @@ export const supabaseAdmin = createClient(
   process.env.SUPABASE_SERVICE_ROLE_KEY!
 )
 
-// Post-D20 RLS migration: equals auth.users.id for andrefiker@gmail.com.
-// Used as legacy fallback in app/debug/page.tsx and app/patients/[id]/page.tsx.
-// New code should derive therapist id from auth via createSupabaseServer() instead.
-// Old sentinel value (pre-D20): 'a0000000-0000-0000-0000-000000000001'.
-export const THERAPIST_ID = '60fdab49-c4dd-45cc-9e2b-51bec3504d35'
+// Post-D20 + frontend RLS refactor: THERAPIST_ID constant retired.
+// Read-side queries use createSupabaseServer() (auth-aware, RLS filters by auth.uid).
+// Write-side ingest (webhook, onboarding) uses supabaseAdmin (service_role bypasses RLS).
+// Webhook uses its own ANDRE_THERAPIST_ID local constant scoped to that file.
+//
+// To restore for legacy code: const THERAPIST_ID = '60fdab49-c4dd-45cc-9e2b-51bec3504d35'
