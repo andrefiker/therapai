@@ -1061,7 +1061,7 @@ function buildMolecularUserPrompt(t: FirefliesTranscript, transcriptText: string
     `Duração: ${Math.round(t.duration)}min`,
   ].join('\n');
 
-  return `Transcrição da sessão clínica abaixo. Identifique 3-7 eventos clínicos discretos e analise cada um separadamente.
+  return `Transcrição da sessão clínica abaixo. Identifique 3-7 eventos clínicos discretos, analise cada um separadamente em narrativa, E emita OBRIGATORIAMENTE o anexo JSON estruturado ao final (\`eventos_estruturados[]\`). O bloco JSON é parte da entrega — sem ele a análise é considerada incompleta e o sistema de memória clínica perde o sinal por sessão. Se a transcrição não tiver conteúdo verbal suficiente para identificar eventos (apenas timestamps/overview), explique brevemente e emita \`{"eventos_estruturados": []}\` como anexo.
 
 ${meta}
 
