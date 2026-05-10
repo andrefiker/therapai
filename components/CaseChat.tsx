@@ -24,6 +24,7 @@ interface ChatResponse {
     molecular_recent: number
     confirmed_assertions: number
     pending_assertions: number
+    prior_turns?: number
   }
   generated_at?: string
   error?: string
@@ -186,6 +187,7 @@ export function CaseChat({ patientId }: { patientId: string }) {
                     {entry.response.context_size.longitudinal && ' + longitudinal'}
                     {entry.response.context_size.confirmed_assertions > 0 && ` + ${entry.response.context_size.confirmed_assertions} confirmada`}
                     {entry.response.context_size.pending_assertions > 0 && ` + ${entry.response.context_size.pending_assertions} pendente`}
+                    {(entry.response.context_size.prior_turns ?? 0) > 0 && ` + ${entry.response.context_size.prior_turns} turno`}
                   </span>
                 )}
               </div>

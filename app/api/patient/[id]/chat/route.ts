@@ -22,6 +22,7 @@ const OPENAI_MODEL = 'gpt-4o';
 const RECENT_SESSIONS = 5;
 const PENDING_LIMIT = 30;
 const HISTORY_LIMIT = 20;
+const CONTEXT_HISTORY_LIMIT = 4; // F4 V2.2: include last N Q&A pairs in inference context
 
 // GET — return the last N queries for this patient. Used by CaseChat on mount.
 export async function GET(_req: NextRequest, { params }: { params: Promise<{ id: string }> }): Promise<NextResponse> {
@@ -98,7 +99,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   if (!patient) return NextResponse.json({ error: 'not_found' }, { status: 404 });
 
   // Pull full context in parallel
-  const [longRes, molarRes, molecularRes, confirmedRes, pendingRes] = await Promise.all([
+  const [longRes, molarRes, molecularRes, confirmedRes, pendingRes, historyRes] = await Promise.all([
     supabase.from('therapai_longitudinal')
       .select('report_md, sessions_count, period_start, period_end')
       .eq('patient_id', patientId).maybeSingle(),
@@ -121,6 +122,13 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
       .is('superseded_by_id', null)
       .order('created_at', { ascending: false })
       .limit(PENDING_LIMIT),
+    // F4 V2.2: prior Q&A for multi-turn context. Only successful ones.
+    supabase.from('therapai_case_queries')
+      .select('question, answer_md, created_at')
+      .eq('patient_id', patientId)
+      .eq('inference_ok', true)
+      .order('created_at', { ascending: false })
+      .limit(CONTEXT_HISTORY_LIMIT),
   ]);
 
   const longitudinal = longRes.data;
@@ -128,6 +136,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   const molecularRecent = (molecularRes.data ?? []).reverse();
   const confirmedState = confirmedRes.data ?? [];
   const pendingAssertions = pendingRes.data ?? [];
+  const priorTurns = (historyRes.data ?? []).reverse(); // chronological for context
 
   const totalSignal = (longitudinal ? 1 : 0) + molarRecent.length + molecularRecent.length + confirmedState.length + pendingAssertions.length;
   if (totalSignal === 0) {
@@ -139,7 +148,22 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   }
 
   // Build the user prompt
-  const blocks: string[] = [`Paciente: ${patient.name}`, '', `PERGUNTA DO CLÍNICO:`, question, ''];
+  const blocks: string[] = [`Paciente: ${patient.name}`, ''];
+
+  // F4 V2.2: include prior Q&A turns as conversation continuity, when present.
+  if (priorTurns.length > 0) {
+    blocks.push('=== Conversa prévia (turnos anteriores neste paciente, ordem cronológica) ===');
+    type Turn = { question: string; answer_md: string | null; created_at: string };
+    for (const t of priorTurns as Turn[]) {
+      blocks.push(`Q (${(t.created_at as string).slice(0, 16)}): ${t.question}`);
+      blocks.push(`A: ${(t.answer_md ?? '').slice(0, 1500)}${(t.answer_md?.length ?? 0) > 1500 ? '…[truncado]' : ''}`);
+      blocks.push('');
+    }
+    blocks.push('IMPORTANTE: a pergunta abaixo pode referenciar conteúdo acima (ex: "e quanto àquilo que mencionei sobre X?"). Use a conversa prévia para resolver referências; mas ainda assim ancore TODAS as afirmações clínicas no material clínico (longitudinal/molar/molecular/afirmações). Não invente.');
+    blocks.push('');
+  }
+
+  blocks.push('PERGUNTA DO CLÍNICO:', question, '');
 
   if (longitudinal?.report_md) {
     blocks.push('=== Relatório Longitudinal ===');
@@ -201,6 +225,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
         molecular_recent: molecularRecent.length,
         confirmed_assertions: confirmedState.length,
         pending_assertions: pendingAssertions.length,
+        prior_turns: priorTurns.length,
       },
       inference_ok: false,
       error_text: (err as Error).message?.slice(0, 500) ?? 'unknown',
@@ -255,6 +280,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     molecular_recent: molecularRecent.length,
     confirmed_assertions: confirmedState.length,
     pending_assertions: pendingAssertions.length,
+    prior_turns: priorTurns.length,
   };
 
   // Persist the Q&A for audit trail + history-from-DB. Don't fail the request if this fails.
