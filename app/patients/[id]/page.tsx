@@ -14,7 +14,8 @@ async function getPatient(id: string) {
       id, name, notes, created_at,
       therapai_sessions (
         id, session_date, status,
-        therapai_analyses (id, analysis_md, session_number)
+        therapai_analyses (id, analysis_md, session_number),
+        therapai_molecular_analyses (id, molecular_md, events_count)
       ),
       therapai_longitudinal (
         id, report_md, sessions_count, period_start, period_end, updated_at
@@ -120,17 +121,36 @@ export default async function PatientPage({ params }: { params: Promise<{ id: st
             </div>
           )}
 
-          {sessions.filter((s: any) => s.therapai_analyses?.length > 0).map((s: any) => (
-            <div key={s.id} className="bg-white rounded-xl border border-slate-200 p-6">
-              <h2 className="text-base font-semibold text-slate-900 mb-4">
-                Análise — {s.session_date}
-                <span className="ml-2 text-xs text-slate-400 font-normal">
-                  Sessão nº {s.therapai_analyses[0].session_number}
-                </span>
-              </h2>
-              <MarkdownViewer md={s.therapai_analyses[0].analysis_md ?? ''} />
-            </div>
-          ))}
+          {sessions.filter((s: any) => s.therapai_analyses?.length > 0).map((s: any) => {
+            const molecular = s.therapai_molecular_analyses?.[0]
+            return (
+              <div key={s.id} className="bg-white rounded-xl border border-slate-200 p-6">
+                <h2 className="text-base font-semibold text-slate-900 mb-4">
+                  Análise — {s.session_date}
+                  <span className="ml-2 text-xs text-slate-400 font-normal">
+                    Sessão nº {s.therapai_analyses[0].session_number}
+                  </span>
+                  {molecular && (
+                    <span className="ml-2 text-xs text-indigo-600 bg-indigo-50 border border-indigo-200 px-2 py-0.5 rounded-full">
+                      + molecular ({molecular.events_count ?? '?'} eventos)
+                    </span>
+                  )}
+                </h2>
+                <div>
+                  <h3 className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-2">Molar (síntese)</h3>
+                  <MarkdownViewer md={s.therapai_analyses[0].analysis_md ?? ''} />
+                </div>
+                {molecular && (
+                  <div className="mt-6 pt-6 border-t border-slate-100">
+                    <h3 className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-2">
+                      Molecular ({molecular.events_count ?? '?'} eventos discretos)
+                    </h3>
+                    <MarkdownViewer md={molecular.molecular_md ?? ''} />
+                  </div>
+                )}
+              </div>
+            )
+          })}
 
           {!longitudinal && analysedCount === 0 && (
             <div className="bg-white rounded-xl border border-dashed border-slate-300 p-10 text-center">

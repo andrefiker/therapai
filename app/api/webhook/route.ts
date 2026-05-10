@@ -138,6 +138,37 @@ Regras:
 }
 \`\`\``;
 
+// D11 molecular tier — discrete-event ABC analysis. Runs as a SECOND inference pass
+// after molar succeeds. Best-effort: if molecular fails, session still completes via molar.
+const MOLECULAR_SYSTEM_PROMPT = `Você é um clínico especialista em Análise do Comportamento e RFT.
+Tarefa: análise MOLECULAR — recorte momento-a-momento da sessão, NÃO síntese integrada.
+
+A análise molar (já produzida) cobre a sessão como um todo. Aqui sua tarefa é diferente: identificar 3 a 7 EVENTOS CLÍNICOS DISCRETOS — momentos específicos da transcrição com peso clínico — e analisar cada um isoladamente.
+
+Critério para selecionar um evento: trecho onde algo CLINICAMENTE LOADED ocorreu — esquiva experiencial, aproximação a conteúdo evitado, derivação relacional notável, ruptura ou reparo de aliança, insight, resistência, validação fora-de-frame, momento de coragem clínica, etc. NÃO selecione todos os momentos — apenas os com carga clínica suficiente.
+
+Em português brasileiro técnico, sem preambles.
+
+ESTRUTURA POR EVENTO (replicar para cada um dos 3-7):
+
+### Evento N — [título descritivo curto, 4-8 palavras]
+
+**Antecedente:** Contexto imediatamente anterior. O que estava em jogo, o que o clínico ofereceu/perguntou, o estado afetivo aparente.
+
+**Comportamento observado:** Citação direta do paciente entre aspas, com timestamp [mm:ss]. Palavra por palavra. Inclua não-verbal brevemente se mencionado.
+
+**Consequência imediata:** O que aconteceu logo depois. Resposta do clínico, mudança no rumo da conversa, mudança de afeto, silêncio, esquiva, aproximação. Cite trecho seguinte se relevante.
+
+**Frame RFT engajado:** Moldura relacional operando — avaliação / identidade / temporal / causal / coerência / transformação de função. Como estrutura a fala. Se nenhuma moldura clara, escreva "Não destacado".
+
+**Função hipotetizada:** O que o comportamento serviu funcionalmente — esquiva experiencial, busca de validação, manutenção de regra rígida, aproximação a conteúdo evitado, etc. Hipótese sua, marque como tal.
+
+---
+
+PADRÕES TRANSVERSAIS (após os eventos): 1-3 padrões que aparecem em múltiplos eventos da mesma sessão. Não invente padrões que aparecem apenas uma vez.
+
+CONTAGEM FINAL: Termine com "**Eventos analisados:** N" para o N entre 3 e 7.`;
+
 const LONGITUDINAL_SYSTEM_PROMPT = `Você é um clínico especialista em Análise do Comportamento e RFT.
 Análise longitudinal rigorosa, em português brasileiro técnico, sintetizando todas as sessões anteriores deste paciente.
 Sem preambles.
@@ -287,6 +318,14 @@ const { error: doneErr } =   await supabase
     if (doneErr) {
           console.error('[webhook][supabase] sessions→done update failed', { sessionId, firefliesId, error: doneErr });
     }
+
+  // 8b. D11 molecular analysis — best-effort second pass. Failure here is non-fatal;
+  //     session is already 'done' via molar. Future re-runs (rescue script) can backfill.
+  try {
+    await runAndSaveMolecular(supabase, sessionId, patientId, transcript, transcriptText);
+  } catch (err) {
+    console.error('[webhook] molecular analysis failed (non-fatal)', err);
+  }
 
   // 9. Rebuild longitudinal for this patient (D9/D12 — every new session).
   try {
@@ -637,6 +676,63 @@ function buildLongitudinalUserPrompt(patientName: string, analyses: { session_nu
   return `Análises de sessão para ${patientName} abaixo. Sintetize a análise longitudinal completa nas 8 seções obrigatórias.
 
 ${body}`;
+}
+
+// ─── D11 molecular analysis ───────────────────────────────────────────────────
+// Discrete-event ABC analysis. Best-effort: failures logged, don't propagate.
+
+function buildMolecularUserPrompt(t: FirefliesTranscript, transcriptText: string): string {
+  const meta = [
+    `Título: ${t.title ?? '(sem título)'}`,
+    `Data: ${normalizeSessionDate(t.date)}`,
+    `Duração: ${Math.round(t.duration)}min`,
+  ].join('\n');
+
+  return `Transcrição da sessão clínica abaixo. Identifique 3-7 eventos clínicos discretos e analise cada um separadamente.
+
+${meta}
+
+---
+
+${transcriptText}`;
+}
+
+function countMolecularEvents(md: string): number {
+  // Try the explicit count line first; fall back to counting "### Evento" headings.
+  const explicit = md.match(/\*\*Eventos analisados:\*\*\s*(\d+)/i);
+  if (explicit) {
+    const n = parseInt(explicit[1], 10);
+    if (Number.isFinite(n) && n >= 0) return n;
+  }
+  const headings = md.match(/^###\s+Evento\s+\d+/gim);
+  return headings ? headings.length : 0;
+}
+
+async function runAndSaveMolecular(
+  supabase: SupabaseClient,
+  sessionId: string,
+  patientId: string,
+  transcript: FirefliesTranscript,
+  transcriptText: string,
+): Promise<void> {
+  const result = await runAnalysisWithFallback(
+    MOLECULAR_SYSTEM_PROMPT,
+    buildMolecularUserPrompt(transcript, transcriptText),
+  );
+  const eventsCount = countMolecularEvents(result.text);
+
+  const { error } = await supabase.from('therapai_molecular_analyses').upsert({
+    session_id: sessionId,
+    patient_id: patientId,
+    therapist_id: ANDRE_THERAPIST_ID,
+    molecular_md: result.text,
+    events_count: eventsCount,
+    model_used: result.model,
+  }, { onConflict: 'session_id' });
+
+  if (error) {
+    throw new Error(`molecular_save_failed: ${error.message ?? 'unknown'}`);
+  }
 }
 
 // ─── Longitudinal rebuild ─────────────────────────────────────────────────────
