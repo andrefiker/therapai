@@ -103,7 +103,40 @@ Seções obrigatórias:
 4. Manejo Terapêutico
 5. Sugestões de Intervenção
 6. Prognóstico
-7. Hipóteses para Próxima Sessão`;
+7. Hipóteses para Próxima Sessão
+
+ANEXO ESTRUTURADO OBRIGATÓRIO (D16/F1 — prontuário psicológico, CFP Resolução 11/2018):
+Após a seção 7, emita um bloco JSON fenced (\`\`\`json ... \`\`\`) com a estrutura abaixo. Este bloco é a ponte para sistemas de prontuário e para extração programática de estado clínico longitudinal — não é redundância visual.
+
+Regras:
+- Use \`null\` para campos sem evidência na sessão. NÃO invente.
+- Strings curtas e específicas. Para campos de lista, emita arrays vazios \`[]\` se não houver itens.
+- O JSON deve parsear como JSON válido. Aspas duplas, sem comentários, sem trailing commas.
+- Códigos CID-10 só quando explicitamente discutidos ou claramente derivados; caso contrário, omita o array ou use \`[]\`.
+
+\`\`\`json
+{
+  "identificacao": {
+    "nome_paciente": "<nome>",
+    "data_sessao": "<YYYY-MM-DD>",
+    "duracao_min": <número ou null>
+  },
+  "demanda": "<demanda original que trouxe o paciente — uma frase>",
+  "queixa_principal_sessao": "<o que o paciente trouxe NESTA sessão — uma frase>",
+  "hipotese_diagnostica": {
+    "formulacao_comportamental": "<formulação funcional curta>",
+    "cid_codigos": []
+  },
+  "intervencoes_aplicadas": ["<intervenção 1>", "<intervenção 2>"],
+  "evolucao": "<movimento clínico observado nesta sessão — progressão / regressão / oscilação / estabilidade — com sinal específico>",
+  "encaminhamentos": [],
+  "risco_clinico": {
+    "presente": <true/false>,
+    "tipo": "<suicida / heteroagressivo / autolesivo / null>",
+    "manejo": "<conduta tomada ou null>"
+  }
+}
+\`\`\``;
 
 const LONGITUDINAL_SYSTEM_PROMPT = `Você é um clínico especialista em Análise do Comportamento e RFT.
 Análise longitudinal rigorosa, em português brasileiro técnico, sintetizando todas as sessões anteriores deste paciente.
