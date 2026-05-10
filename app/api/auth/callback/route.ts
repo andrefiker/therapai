@@ -1,6 +1,12 @@
 import { createServerClient } from '@supabase/ssr'
 import { NextResponse, type NextRequest } from 'next/server'
 
+// Closed-signup policy (2026-05-10): magic-link auth completes for any email,
+// but a clinician tenant (therapai_therapists row) only exists for emails an
+// admin has explicitly approved (manually inserted or promoted from waitlist).
+// Unapproved emails: their auth session is signed out and they're routed to
+// /pending. No automatic tenant creation. This keeps the marketing site public
+// while preventing random sign-up of empty tenants on the production backend.
 export async function GET(request: NextRequest) {
   const { searchParams, origin } = new URL(request.url)
   const code = searchParams.get('code')
@@ -8,7 +14,7 @@ export async function GET(request: NextRequest) {
   const type = searchParams.get('type')
   const next = searchParams.get('next') ?? '/dashboard'
 
-  const response = NextResponse.redirect(`${origin}${next}`)
+  let response = NextResponse.redirect(`${origin}${next}`)
 
   const supabase = createServerClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -25,26 +31,38 @@ export async function GET(request: NextRequest) {
     }
   )
 
+  let user: { id: string; email?: string } | null = null
+
   if (code) {
     const { data, error } = await supabase.auth.exchangeCodeForSession(code)
-    if (!error && data.user) {
-      await ensureTherapist(data.user, origin, response)
-    }
+    if (!error && data.user) user = data.user
+  } else if (token_hash && type) {
+    const { data, error } = await supabase.auth.verifyOtp({ token_hash, type: type as 'email' | 'magiclink' | 'recovery' | 'invite' | 'signup' })
+    if (!error && data.user) user = data.user
+  } else {
+    return NextResponse.redirect(`${origin}/login`)
+  }
+
+  if (!user || !user.email) {
     return response
   }
 
-  if (token_hash && type) {
-    const { data, error } = await supabase.auth.verifyOtp({ token_hash, type: type as any })
-    if (!error && data.user) {
-      await ensureTherapist(data.user, origin, response)
-    }
+  const approved = await checkApprovedAndLinkAuth(user)
+
+  if (!approved) {
+    // Sign out the just-created session so they aren't in a tenant-less limbo,
+    // and redirect to the pending page. The setAll cookie callback above writes
+    // the cleared cookies into a fresh response we return.
+    response = NextResponse.redirect(`${origin}/pending`)
+    await supabase.auth.signOut()
     return response
   }
 
-  return NextResponse.redirect(`${origin}/login`)
+  return response
 }
 
-async function ensureTherapist(user: any, origin: string, response: NextResponse) {
+async function checkApprovedAndLinkAuth(user: { id: string; email?: string }): Promise<boolean> {
+  if (!user.email) return false
   try {
     const { createClient } = await import('@supabase/supabase-js')
     const admin = createClient(
@@ -56,23 +74,18 @@ async function ensureTherapist(user: any, origin: string, response: NextResponse
       .from('therapai_therapists')
       .select('id, auth_user_id')
       .eq('email', user.email)
-      .single()
+      .maybeSingle()
 
-    if (!existing) {
-      await admin.from('therapai_therapists').insert({
-        auth_user_id: user.id,
-        name: user.email.split('@')[0],
-        email: user.email,
-        plan: 'trial',
-        sessions_limit: 10,
-      })
-      response.headers.set('x-redirect-to', `${origin}/onboarding`)
-    } else if (!existing.auth_user_id) {
+    if (!existing) return false
+
+    if (!existing.auth_user_id) {
       await admin.from('therapai_therapists')
         .update({ auth_user_id: user.id })
         .eq('email', user.email)
     }
+    return true
   } catch (e) {
-    console.error('ensureTherapist error:', e)
+    console.error('[auth][approval-check] failed:', e)
+    return false
   }
 }
