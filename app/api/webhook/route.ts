@@ -176,10 +176,11 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   }
 
   if (!patientId) {
-    await supabase
+    const { error: unidErr } = await supabase
       .from('therapai_sessions')
       .update({ status: 'unidentified', patient_id: null })
       .eq('id', sessionId);
+        if (unidErr) console.error('[webhook][supabase] unidentified update failed', { sessionId, firefliesId, error: unidErr });
     return NextResponse.json({
       ok: true,
       status: 'unidentified',
@@ -208,7 +209,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   // 8. Save analysis row + update session row.
   const sessionNumber = await nextSessionNumberForPatient(supabase, patientId);
 
-  await supabase.from('therapai_analyses').upsert(
+  const { error: analysisErr } = await supabase.from('therapai_analyses').upsert(
     {
       session_id: sessionId,
       patient_id: patientId,
@@ -218,8 +219,13 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     },
     { onConflict: 'session_id' },
   );
+    if (analysisErr) {
+          console.error('[webhook][supabase] analysis upsert failed', { sessionId, firefliesId, error: analysisErr });
+          await markSessionFailed(supabase, sessionId, firefliesId, `analysis_save_failed: ${analysisErr.message ?? 'unknown'}`);
+          return NextResponse.json({ ok: true, status: 'failed', reason: 'analysis_save' });
+    }
 
-  await supabase
+const { error: doneErr } =   await supabase
     .from('therapai_sessions')
     .update({
       patient_id: patientId,
@@ -227,6 +233,9 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       model_used: modelUsed,
     })
     .eq('id', sessionId);
+    if (doneErr) {
+          console.error('[webhook][supabase] sessions→done update failed', { sessionId, firefliesId, error: doneErr });
+    }
 
   // 9. Rebuild longitudinal for this patient (D9/D12 — every new session).
   try {
@@ -393,13 +402,16 @@ async function markSessionFailed(
   reason: string,
 ): Promise<void> {
   if (sessionId) {
-    await supabase
+    const { error } = await supabase
       .from('therapai_sessions')
       .update({ status: 'failed', model_used: reason.slice(0, 200) })
       .eq('id', sessionId);
+          if (error) {
+                    console.error('[webhook][supabase] markSessionFailed update failed', { sessionId, firefliesId, reason, error });
+          }
     return;
   }
-  await supabase
+  const { error } = await supabase
     .from('therapai_sessions')
     .upsert(
       {
@@ -411,6 +423,9 @@ async function markSessionFailed(
       },
       { onConflict: 'fireflies_id' },
     );
+    if (error) {
+          console.error('[webhook][supabase] markSessionFailed upsert failed', { firefliesId, reason, error });
+    }
 }
 
 async function nextSessionNumberForPatient(supabase: SupabaseClient, patientId: string): Promise<number> {
