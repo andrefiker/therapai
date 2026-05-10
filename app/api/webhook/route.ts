@@ -39,7 +39,11 @@ const ANTHROPIC_MODEL = 'claude-opus-4-5';
 const OPENAI_MODEL = 'gpt-4o';
 
 // V1 — single therapist hardcoded. Multi-tenant onboarding will derive this from auth.
-const ANDRE_THERAPIST_ID = 'a0000000-0000-0000-0000-000000000001';
+// Post-RLS migration (D20): this UUID = auth.users.id for andrefiker@gmail.com.
+// Service role bypasses RLS so the webhook still inserts/updates freely;
+// the constant only needs to match the current owning therapist's auth uid.
+// Old sentinel value (pre-D20): 'a0000000-0000-0000-0000-000000000001'.
+const ANDRE_THERAPIST_ID = '60fdab49-c4dd-45cc-9e2b-51bec3504d35';
 
 // Patterns to skip when matching speaker names — these are André's voice across speaker labels.
 const ANDRE_NAME_PATTERNS = ['andre', 'andré', 'fiker', 'ghost'];
