@@ -42,11 +42,34 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
       .is('dismissed_by_clinician_at', null)
       .is('superseded_by_id', null)
       .order('created_at', { ascending: false })
-      .limit(50),
+      .limit(200),
   ]);
 
   if (stateErr) console.error('[memory][state] rpc failed', stateErr);
   if (pendingErr) console.error('[memory][pending] query failed', pendingErr);
+
+  // D32 — fetch session_number + session_date for every distinct source_session_id
+  // referenced in pending OR confirmed, so the UI can show "Sessão #N (data)"
+  // chips instead of raw UUIDs.
+  const sourceIds = new Set<string>();
+  for (const r of pendingRows ?? []) if (r.source_session_id) sourceIds.add(r.source_session_id);
+  for (const r of confirmedRows ?? []) {
+    const sid = (r as { source_session_id?: string | null }).source_session_id;
+    if (sid) sourceIds.add(sid);
+  }
+
+  let sessionsIndex: Record<string, { session_number: number | null; session_date: string | null }> = {};
+  if (sourceIds.size > 0) {
+    const { data: sessionRows } = await supabase
+      .from('therapai_sessions')
+      .select('id, session_date, therapai_analyses(session_number)')
+      .in('id', [...sourceIds]);
+    for (const s of sessionRows ?? []) {
+      const analyses = (s as { therapai_analyses?: Array<{ session_number: number | null }> }).therapai_analyses;
+      const num = analyses?.[0]?.session_number ?? null;
+      sessionsIndex[s.id] = { session_number: num, session_date: (s as { session_date?: string | null }).session_date ?? null };
+    }
+  }
 
   return NextResponse.json({
     ok: true,
@@ -54,5 +77,6 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
     patient_name: patient.name,
     confirmed: confirmedRows ?? [],
     pending: pendingRows ?? [],
+    sessions_index: sessionsIndex,
   });
 }
