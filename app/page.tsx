@@ -4,17 +4,14 @@ import Link from 'next/link'
 export const revalidate = 0
 export const dynamic = 'force-dynamic'
 
-// Fallback therapist ID for André while auth is bypassed
-const FALLBACK_ID = 'a0000000-0000-0000-0000-000000000001'
+// Post-D20 RLS migration: therapai_therapists.id IS auth.users.id by design.
+// No DB lookup needed — userId from auth.getUser() is the therapist id directly.
+// Middleware redirects unauthenticated requests to /login, so userId is normally set;
+// FALLBACK_ID retained only as defense-in-depth for the unreachable-by-design path.
+const FALLBACK_ID = '60fdab49-c4dd-45cc-9e2b-51bec3504d35'
 
 async function getTherapistId(userId: string | undefined) {
-  if (!userId) return FALLBACK_ID
-  const { data } = await supabaseAdmin
-    .from('therapai_therapists')
-    .select('id')
-    .eq('auth_user_id', userId)
-    .single()
-  return data?.id ?? FALLBACK_ID
+  return userId ?? FALLBACK_ID
 }
 
 async function getStats(therapistId: string) {
