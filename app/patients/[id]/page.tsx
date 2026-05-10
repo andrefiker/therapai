@@ -1,5 +1,6 @@
 import { createSupabaseServer } from '@/lib/supabase'
 import { BriefingButton } from '@/components/BriefingButton'
+import { AssertionsPanel } from '@/components/AssertionsPanel'
 import Link from 'next/link'
 
 export const revalidate = 0
@@ -107,6 +108,7 @@ export default async function PatientPage({ params }: { params: Promise<{ id: st
         </div>
 
         <div className="col-span-2 space-y-6">
+          <AssertionsPanel patientId={patient.id} />
           <BriefingButton patientId={patient.id} />
 
           {longitudinal && (

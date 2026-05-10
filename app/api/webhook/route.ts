@@ -327,6 +327,15 @@ const { error: doneErr } =   await supabase
     console.error('[webhook] molecular analysis failed (non-fatal)', err);
   }
 
+  // 8c. D25 F2+F5 — extract clinical state assertions from the F1 prontuário JSON
+  //     appendix in molar analysis_md. Best-effort. All assertions inserted with
+  //     requires_confirmation=true; clinician confirms/dismisses via dashboard.
+  try {
+    await extractAndSaveAssertions(supabase, sessionId, patientId, analysisMd);
+  } catch (err) {
+    console.error('[webhook] assertion extraction failed (non-fatal)', err);
+  }
+
   // 9. Rebuild longitudinal for this patient (D9/D12 — every new session).
   try {
     await rebuildLongitudinalForPatient(supabase, patientId);
@@ -676,6 +685,133 @@ function buildLongitudinalUserPrompt(patientName: string, analyses: { session_nu
   return `Análises de sessão para ${patientName} abaixo. Sintetize a análise longitudinal completa nas 8 seções obrigatórias.
 
 ${body}`;
+}
+
+// ─── D25 F2+F5 assertion extraction ──────────────────────────────────────────
+// Parses the F1 prontuário JSON appendix from analysis_md and inserts one row
+// per (dimension, sub_key) into therapai_patient_memory_assertions. All rows
+// default to requires_confirmation=true — clinician must confirm via dashboard
+// before they enter the canonical patient_state.
+
+type AssertionDimension =
+  | 'complaint'
+  | 'diagnosis_cid'
+  | 'medication'
+  | 'risk_factor'
+  | 'behavioral_theme'
+  | 'relational_frame'
+  | 'alliance_event'
+  | 'historical_event'
+  | 'intervention';
+
+interface AssertionInsert {
+  dimension: AssertionDimension;
+  sub_key: string | null;
+  assertion_text: string;
+  structured_value: unknown;
+}
+
+function extractFencedJson(md: string): unknown | null {
+  // Match the LAST fenced ```json ... ``` block in analysis_md (F1 appendix is at end).
+  const re = /```json\s*\n([\s\S]*?)\n```/gi;
+  let last: string | null = null;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(md)) !== null) last = m[1];
+  if (!last) return null;
+  try { return JSON.parse(last); }
+  catch { return null; }
+}
+
+function deriveAssertions(prontuario: unknown): AssertionInsert[] {
+  if (!prontuario || typeof prontuario !== 'object') return [];
+  const p = prontuario as Record<string, unknown>;
+  const out: AssertionInsert[] = [];
+  const pushIf = (text: unknown, dim: AssertionDimension, sub_key: string | null, structured?: unknown) => {
+    if (typeof text === 'string' && text.trim() && text.trim().toLowerCase() !== 'null') {
+      out.push({ dimension: dim, sub_key, assertion_text: text.trim(), structured_value: structured ?? null });
+    }
+  };
+
+  pushIf(p.demanda, 'complaint', 'initial_demanda');
+  pushIf(p.queixa_principal_sessao, 'complaint', 'current_session');
+  pushIf(p.evolucao, 'behavioral_theme', 'movimento_clinico');
+
+  const hd = p.hipotese_diagnostica as Record<string, unknown> | undefined;
+  if (hd && typeof hd === 'object') {
+    pushIf(hd.formulacao_comportamental, 'behavioral_theme', 'formulacao');
+    const cids = Array.isArray(hd.cid_codigos) ? hd.cid_codigos : [];
+    for (const code of cids) {
+      if (typeof code === 'string' && code.trim()) {
+        out.push({ dimension: 'diagnosis_cid', sub_key: code.trim(), assertion_text: code.trim(), structured_value: { code } });
+      }
+    }
+  }
+
+  const ints = Array.isArray(p.intervencoes_aplicadas) ? p.intervencoes_aplicadas : [];
+  for (let i = 0; i < ints.length; i++) {
+    const v = ints[i];
+    if (typeof v === 'string' && v.trim()) {
+      out.push({ dimension: 'intervention', sub_key: `s${i}`, assertion_text: v.trim(), structured_value: null });
+    }
+  }
+
+  const enc = Array.isArray(p.encaminhamentos) ? p.encaminhamentos : [];
+  for (let i = 0; i < enc.length; i++) {
+    const v = enc[i];
+    if (typeof v === 'string' && v.trim()) {
+      out.push({ dimension: 'historical_event', sub_key: `encaminhamento_${i}`, assertion_text: v.trim(), structured_value: { kind: 'encaminhamento' } });
+    }
+  }
+
+  const risco = p.risco_clinico as Record<string, unknown> | undefined;
+  if (risco && typeof risco === 'object' && risco.presente === true) {
+    const tipo = typeof risco.tipo === 'string' ? risco.tipo : 'inespecificado';
+    const manejo = typeof risco.manejo === 'string' ? risco.manejo : null;
+    out.push({
+      dimension: 'risk_factor',
+      sub_key: tipo,
+      assertion_text: manejo ? `Risco ${tipo} presente — manejo: ${manejo}` : `Risco ${tipo} presente`,
+      structured_value: { tipo, manejo, presente: true },
+    });
+  }
+
+  return out;
+}
+
+async function extractAndSaveAssertions(
+  supabase: SupabaseClient,
+  sessionId: string,
+  patientId: string,
+  analysisMd: string,
+): Promise<void> {
+  const prontuario = extractFencedJson(analysisMd);
+  if (!prontuario) {
+    console.log('[webhook][assertions] no F1 JSON appendix found in molar; skipping extraction');
+    return;
+  }
+  const assertions = deriveAssertions(prontuario);
+  if (assertions.length === 0) {
+    console.log('[webhook][assertions] F1 JSON parsed but produced 0 assertions');
+    return;
+  }
+  const rows = assertions.map((a) => ({
+    patient_id: patientId,
+    therapist_id: ANDRE_THERAPIST_ID,
+    source_session_id: sessionId,
+    dimension: a.dimension,
+    sub_key: a.sub_key,
+    assertion_text: a.assertion_text,
+    structured_value: a.structured_value,
+    confidence: null, // deterministic JSON parse, not LLM-emitted confidence
+    source_kind: 'webhook_f1_json',
+    model_emitted: null,
+    requires_confirmation: true,
+  }));
+  const { error } = await supabase.from('therapai_patient_memory_assertions').insert(rows);
+  if (error) {
+    throw new Error(`assertions_insert_failed: ${error.message}`);
+  }
+  console.log(`[webhook][assertions] inserted ${rows.length} pending assertions for session ${sessionId}`);
 }
 
 // ─── D11 molecular analysis ───────────────────────────────────────────────────
