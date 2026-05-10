@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, FormEvent } from 'react'
+import { useEffect, useState, FormEvent } from 'react'
 
 interface SourceRef {
   kind: 'longitudinal' | 'molar' | 'molecular' | 'assertion_confirmed' | 'assertion_pending'
@@ -13,6 +13,7 @@ interface SourceRef {
 
 interface ChatResponse {
   ok: boolean
+  id?: string | null
   answer_md?: string
   model_used?: string
   patient_name?: string
@@ -29,10 +30,40 @@ interface ChatResponse {
   message?: string
 }
 
+interface PersistedQuery {
+  id: string
+  question: string
+  answer_md: string | null
+  model_used: string | null
+  sources_provided: SourceRef[] | null
+  context_size: ChatResponse['context_size'] | null
+  inference_ok: boolean
+  error_text: string | null
+  created_at: string
+}
+
 interface QAEntry {
   question: string
   response: ChatResponse
   asked_at: string
+}
+
+function persistedToQAEntry(p: PersistedQuery): QAEntry {
+  return {
+    question: p.question,
+    asked_at: p.created_at,
+    response: {
+      ok: p.inference_ok,
+      id: p.id,
+      answer_md: p.answer_md ?? undefined,
+      model_used: p.model_used ?? undefined,
+      sources_provided: p.sources_provided ?? undefined,
+      context_size: p.context_size ?? undefined,
+      generated_at: p.created_at,
+      error: p.inference_ok ? undefined : 'persisted_failure',
+      message: p.error_text ?? undefined,
+    },
+  }
 }
 
 function renderInlineMd(md: string): string {
@@ -48,8 +79,30 @@ function renderInlineMd(md: string): string {
 export function CaseChat({ patientId }: { patientId: string }) {
   const [question, setQuestion] = useState('')
   const [loading, setLoading] = useState(false)
+  const [historyLoading, setHistoryLoading] = useState(true)
   const [history, setHistory] = useState<QAEntry[]>([])
   const [error, setError] = useState<string | null>(null)
+
+  // Load persisted history on mount
+  useEffect(() => {
+    let cancelled = false
+    async function loadHistory() {
+      try {
+        const res = await fetch(`/api/patient/${patientId}/chat`, { cache: 'no-store' })
+        const json = await res.json() as { ok: boolean; history?: PersistedQuery[] }
+        if (cancelled) return
+        if (res.ok && json.history) {
+          setHistory(json.history.map(persistedToQAEntry))
+        }
+      } catch {
+        // history-load failure is non-fatal; user can still ask new questions
+      } finally {
+        if (!cancelled) setHistoryLoading(false)
+      }
+    }
+    void loadHistory()
+    return () => { cancelled = true }
+  }, [patientId])
 
   async function onSubmit(e: FormEvent) {
     e.preventDefault()
@@ -68,7 +121,7 @@ export function CaseChat({ patientId }: { patientId: string }) {
       if (!res.ok || (!json.ok && !json.answer_md)) {
         setError(json.message ?? json.error ?? `HTTP ${res.status}`)
       } else {
-        setHistory((h) => [{ question: q, response: json, asked_at: new Date().toISOString() }, ...h])
+        setHistory((h) => [{ question: q, response: json, asked_at: json.generated_at ?? new Date().toISOString() }, ...h])
         setQuestion('')
       }
     } catch (e) {
@@ -114,6 +167,10 @@ export function CaseChat({ patientId }: { patientId: string }) {
         <div className="mb-4 rounded-lg bg-amber-50 border border-amber-200 p-3 text-sm text-amber-900">
           {error}
         </div>
+      )}
+
+      {historyLoading && history.length === 0 && (
+        <div className="text-sm text-slate-400">Carregando histórico…</div>
       )}
 
       {history.length > 0 && (

@@ -21,6 +21,30 @@ const ANTHROPIC_MODEL = 'claude-opus-4-5';
 const OPENAI_MODEL = 'gpt-4o';
 const RECENT_SESSIONS = 5;
 const PENDING_LIMIT = 30;
+const HISTORY_LIMIT = 20;
+
+// GET — return the last N queries for this patient. Used by CaseChat on mount.
+export async function GET(_req: NextRequest, { params }: { params: Promise<{ id: string }> }): Promise<NextResponse> {
+  const { id: patientId } = await params;
+  if (!patientId) return NextResponse.json({ error: 'missing_patient_id' }, { status: 400 });
+
+  const supabase = await createSupabaseServer();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return NextResponse.json({ error: 'unauthorized' }, { status: 401 });
+
+  const { data: patient } = await supabase
+    .from('therapai_patients').select('id').eq('id', patientId).maybeSingle();
+  if (!patient) return NextResponse.json({ error: 'not_found' }, { status: 404 });
+
+  const { data: history } = await supabase
+    .from('therapai_case_queries')
+    .select('id, question, answer_md, model_used, sources_provided, context_size, inference_ok, error_text, created_at')
+    .eq('patient_id', patientId)
+    .order('created_at', { ascending: false })
+    .limit(HISTORY_LIMIT);
+
+  return NextResponse.json({ ok: true, history: history ?? [] });
+}
 
 const CHAT_SYSTEM_PROMPT = `Você é assistente clínico do Dr. André Fiker, especialista em Análise do Comportamento e RFT.
 
@@ -163,6 +187,24 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     result = await runChatInference(userPrompt);
   } catch (err) {
     console.error('[chat] inference failed', err);
+    // Persist the failed attempt for audit trail
+    await supabase.from('therapai_case_queries').insert({
+      patient_id: patient.id,
+      therapist_id: user.id,
+      question,
+      answer_md: null,
+      model_used: null,
+      sources_provided: null,
+      context_size: {
+        longitudinal: !!longitudinal,
+        molar_recent: molarRecent.length,
+        molecular_recent: molecularRecent.length,
+        confirmed_assertions: confirmedState.length,
+        pending_assertions: pendingAssertions.length,
+      },
+      inference_ok: false,
+      error_text: (err as Error).message?.slice(0, 500) ?? 'unknown',
+    });
     return NextResponse.json({
       ok: false,
       error: 'inference_failed',
@@ -207,20 +249,38 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     });
   }
 
+  const contextSize = {
+    longitudinal: !!longitudinal,
+    molar_recent: molarRecent.length,
+    molecular_recent: molecularRecent.length,
+    confirmed_assertions: confirmedState.length,
+    pending_assertions: pendingAssertions.length,
+  };
+
+  // Persist the Q&A for audit trail + history-from-DB. Don't fail the request if this fails.
+  const { data: persisted, error: insertErr } = await supabase.from('therapai_case_queries').insert({
+    patient_id: patient.id,
+    therapist_id: user.id,
+    question,
+    answer_md: result.text,
+    model_used: result.model,
+    sources_provided: sources,
+    context_size: contextSize,
+    inference_ok: true,
+  }).select('id, created_at').maybeSingle();
+  if (insertErr) {
+    console.error('[chat] persist failed (non-fatal)', insertErr);
+  }
+
   return NextResponse.json({
     ok: true,
+    id: persisted?.id ?? null,
     answer_md: result.text,
     model_used: result.model,
     patient_name: patient.name,
     sources_provided: sources,
-    context_size: {
-      longitudinal: !!longitudinal,
-      molar_recent: molarRecent.length,
-      molecular_recent: molecularRecent.length,
-      confirmed_assertions: confirmedState.length,
-      pending_assertions: pendingAssertions.length,
-    },
-    generated_at: new Date().toISOString(),
+    context_size: contextSize,
+    generated_at: persisted?.created_at ?? new Date().toISOString(),
   });
 }
 
