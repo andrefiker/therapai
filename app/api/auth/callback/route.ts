@@ -70,20 +70,39 @@ async function checkApprovedAndLinkAuth(user: { id: string; email?: string }): P
       process.env.SUPABASE_SERVICE_ROLE_KEY!
     )
 
-    const { data: existing } = await admin
+    // D20 design: therapai_therapists.id IS auth.users.id (no separate auth_user_id column).
+    // Two paths to approval:
+    //   1) A row already exists where id = auth.uid() — happy path, returning therapist.
+    //   2) A pre-provisioned row exists by email but with a placeholder id — admin staged it
+    //      before the user's first login. We rewrite the id to auth.uid() so RLS works.
+    //
+    // No match on either → not approved → caller sends them to /pending.
+
+    const { data: byId } = await admin
       .from('therapai_therapists')
-      .select('id, auth_user_id')
+      .select('id')
+      .eq('id', user.id)
+      .maybeSingle()
+    if (byId) return true
+
+    const { data: byEmail } = await admin
+      .from('therapai_therapists')
+      .select('id')
       .eq('email', user.email)
       .maybeSingle()
-
-    if (!existing) return false
-
-    if (!existing.auth_user_id) {
-      await admin.from('therapai_therapists')
-        .update({ auth_user_id: user.id })
-        .eq('email', user.email)
+    if (byEmail && byEmail.id !== user.id) {
+      const { error: updErr } = await admin
+        .from('therapai_therapists')
+        .update({ id: user.id })
+        .eq('id', byEmail.id)
+      if (updErr) {
+        console.error('[auth][approval-check] id realignment failed:', updErr)
+        return false
+      }
+      return true
     }
-    return true
+
+    return false
   } catch (e) {
     console.error('[auth][approval-check] failed:', e)
     return false
