@@ -229,8 +229,8 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     transcript = await fetchFirefliesTranscript(firefliesId);
   } catch (err) {
     console.error('[webhook] fireflies fetch failed', err);
-    await markSessionFailed(supabase, existing?.id, firefliesId, `fireflies_fetch_failed: ${(err as Error).message}`);
-    return NextResponse.json({ ok: true, status: 'failed', reason: 'fireflies_fetch' });
+    const mark = await markSessionFailed(supabase, existing?.id, firefliesId, `fireflies_fetch_failed: ${(err as Error).message}`);
+    return NextResponse.json({ ok: true, status: 'failed', reason: 'fireflies_fetch', save: mark });
   }
 
   // 5. Build / update session row in 'processing' state.
@@ -255,12 +255,21 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       .from('therapai_sessions')
       .update({ status: 'unidentified', patient_id: null })
       .eq('id', sessionId);
-        if (unidErr) console.error('[webhook][supabase] unidentified update failed', { sessionId, firefliesId, error: unidErr });
+    let saveOk = !unidErr;
+    let saveErr = unidErr?.message;
+    if (unidErr) {
+      console.error('[webhook][supabase] unidentified update failed', { sessionId, firefliesId, error: unidErr });
+    }
+    const verified = saveOk ? await verifyRowStatus(supabase, sessionId, 'unidentified') : false;
+    if (saveOk && !verified) {
+      console.error('[webhook][supabase] unidentified update returned ok but post-write verify failed', { sessionId, firefliesId });
+    }
     return NextResponse.json({
       ok: true,
       status: 'unidentified',
       sessionId,
       detectedName: patientName ?? null,
+      save: { ok: saveOk, verified, sessionId, error: saveErr },
     });
   }
 
@@ -281,11 +290,11 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     // Provider-side failure (credit / auth / transient) is retryable from outside Vercel
     // via the rescue script's Codex tier. Mark differently so the rescue picker can find it.
     if (err instanceof ProviderError) {
-      await markSessionFailedRetryPending(supabase, sessionId, firefliesId, reason);
-      return NextResponse.json({ ok: true, status: 'failed_retry_pending', reason: 'analysis_provider' });
+      const mark = await markSessionFailedRetryPending(supabase, sessionId, firefliesId, reason);
+      return NextResponse.json({ ok: true, status: 'failed_retry_pending', reason: 'analysis_provider', save: mark });
     }
-    await markSessionFailed(supabase, sessionId, firefliesId, reason);
-    return NextResponse.json({ ok: true, status: 'failed', reason: 'analysis' });
+    const mark = await markSessionFailed(supabase, sessionId, firefliesId, reason);
+    return NextResponse.json({ ok: true, status: 'failed', reason: 'analysis', save: mark });
   }
 
   // 8. Save analysis row + update session row.
@@ -302,12 +311,12 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     { onConflict: 'session_id' },
   );
     if (analysisErr) {
-          console.error('[webhook][supabase] analysis upsert failed', { sessionId, firefliesId, error: analysisErr });
-          await markSessionFailed(supabase, sessionId, firefliesId, `analysis_save_failed: ${analysisErr.message ?? 'unknown'}`);
-          return NextResponse.json({ ok: true, status: 'failed', reason: 'analysis_save' });
+      console.error('[webhook][supabase] analysis upsert failed', { sessionId, firefliesId, error: analysisErr });
+      const mark = await markSessionFailed(supabase, sessionId, firefliesId, `analysis_save_failed: ${analysisErr.message ?? 'unknown'}`);
+      return NextResponse.json({ ok: true, status: 'failed', reason: 'analysis_save', save: mark });
     }
 
-const { error: doneErr } =   await supabase
+  const { error: doneErr } = await supabase
     .from('therapai_sessions')
     .update({
       patient_id: patientId,
@@ -315,9 +324,12 @@ const { error: doneErr } =   await supabase
       model_used: modelUsed,
     })
     .eq('id', sessionId);
-    if (doneErr) {
-          console.error('[webhook][supabase] sessions→done update failed', { sessionId, firefliesId, error: doneErr });
-    }
+  const doneVerified = !doneErr ? await verifyRowStatus(supabase, sessionId, 'done') : false;
+  if (doneErr) {
+    console.error('[webhook][supabase] sessions→done update failed', { sessionId, firefliesId, error: doneErr });
+  } else if (!doneVerified) {
+    console.error('[webhook][supabase] sessions→done update returned ok but post-write verify failed', { sessionId, firefliesId });
+  }
 
   // 8b. D11 molecular analysis — best-effort second pass. Failure here is non-fatal;
   //     session is already 'done' via molar. Future re-runs (rescue script) can backfill.
@@ -350,6 +362,7 @@ const { error: doneErr } =   await supabase
     sessionId,
     patientId,
     model: modelUsed,
+    save: { ok: !doneErr, verified: doneVerified, sessionId, error: doneErr?.message },
   });
 }
 
@@ -494,12 +507,23 @@ async function upsertProcessingSession(
   return data.id;
 }
 
+// E7 closure: markSession* now returns a typed result + does post-write verification
+// SELECT, so callers can surface the real save state in the response. Previously these
+// helpers returned void and silent supabase-js failures left "ghost" sessions invisible
+// in the dashboard. Now: the response body always includes `save: {ok, verified, error?}`.
+interface MarkResult {
+  ok: boolean;          // true if the write call returned no error
+  verified: boolean;    // true if a follow-up SELECT confirms the status actually stuck
+  sessionId?: string;   // resolved session id (the existing one, or fetched after upsert)
+  error?: string;       // first error message encountered, if any
+}
+
 async function markSessionFailed(
   supabase: SupabaseClient,
   sessionId: string | undefined,
   firefliesId: string,
   reason: string,
-): Promise<void> {
+): Promise<MarkResult> {
   return markSessionWithStatus(supabase, sessionId, firefliesId, reason, 'failed');
 }
 
@@ -508,7 +532,7 @@ async function markSessionFailedRetryPending(
   sessionId: string | undefined,
   firefliesId: string,
   reason: string,
-): Promise<void> {
+): Promise<MarkResult> {
   return markSessionWithStatus(supabase, sessionId, firefliesId, reason, 'failed_retry_pending');
 }
 
@@ -518,7 +542,7 @@ async function markSessionWithStatus(
   firefliesId: string,
   reason: string,
   status: 'failed' | 'failed_retry_pending',
-): Promise<void> {
+): Promise<MarkResult> {
   if (sessionId) {
     const { error } = await supabase
       .from('therapai_sessions')
@@ -526,10 +550,17 @@ async function markSessionWithStatus(
       .eq('id', sessionId);
     if (error) {
       console.error(`[webhook][supabase] markSession(${status}) update failed`, { sessionId, firefliesId, reason, error });
+      return { ok: false, verified: false, sessionId, error: error.message };
     }
-    return;
+    const verified = await verifyRowStatus(supabase, sessionId, status);
+    if (!verified) {
+      console.error(`[webhook][supabase] markSession(${status}) update returned ok but post-write verify failed`, { sessionId, firefliesId });
+    }
+    return { ok: true, verified, sessionId };
   }
-  const { error } = await supabase
+  // Upsert path — no existing sessionId. We need to capture the row's id after upsert
+  // so verification can confirm it stuck.
+  const { data, error } = await supabase
     .from('therapai_sessions')
     .upsert(
       {
@@ -540,10 +571,41 @@ async function markSessionWithStatus(
         model_used: reason.slice(0, 200),
       },
       { onConflict: 'fireflies_id' },
-    );
+    )
+    .select('id')
+    .maybeSingle();
   if (error) {
     console.error(`[webhook][supabase] markSession(${status}) upsert failed`, { firefliesId, reason, error });
+    return { ok: false, verified: false, error: error.message };
   }
+  if (!data?.id) {
+    // Race or quirk: upsert reported ok but no id returned. Look it up.
+    const { data: lookup } = await supabase
+      .from('therapai_sessions')
+      .select('id')
+      .eq('fireflies_id', firefliesId)
+      .maybeSingle();
+    if (!lookup?.id) {
+      console.error(`[webhook][supabase] markSession(${status}) upsert: row not found post-write`, { firefliesId });
+      return { ok: false, verified: false, error: 'row_not_found_post_upsert' };
+    }
+    const verified = await verifyRowStatus(supabase, lookup.id, status);
+    return { ok: true, verified, sessionId: lookup.id };
+  }
+  const verified = await verifyRowStatus(supabase, data.id, status);
+  if (!verified) {
+    console.error(`[webhook][supabase] markSession(${status}) upsert returned ok but post-write verify failed`, { firefliesId, sessionId: data.id });
+  }
+  return { ok: true, verified, sessionId: data.id };
+}
+
+async function verifyRowStatus(supabase: SupabaseClient, sessionId: string, expected: string): Promise<boolean> {
+  const { data } = await supabase
+    .from('therapai_sessions')
+    .select('status')
+    .eq('id', sessionId)
+    .maybeSingle();
+  return data?.status === expected;
 }
 
 async function nextSessionNumberForPatient(supabase: SupabaseClient, patientId: string): Promise<number> {
