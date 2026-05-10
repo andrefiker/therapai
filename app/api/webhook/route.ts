@@ -25,7 +25,7 @@ import Anthropic from '@anthropic-ai/sdk';
 import OpenAI from 'openai';
 
 export const runtime = 'nodejs';
-export const maxDuration = 60;
+export const maxDuration = 300; // Vercel Pro supports up to 300s; long transcripts need it.
 
 // ─── Env ──────────────────────────────────────────────────────────────────────
 const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL!;
@@ -202,7 +202,14 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     modelUsed = result.model;
   } catch (err) {
     console.error('[webhook] analysis failed both providers', err);
-    await markSessionFailed(supabase, sessionId, firefliesId, `analysis_failed: ${(err as Error).message}`);
+    const reason = `analysis_failed: ${(err as Error).message}`;
+    // Provider-side failure (credit / auth / transient) is retryable from outside Vercel
+    // via the rescue script's Codex tier. Mark differently so the rescue picker can find it.
+    if (err instanceof ProviderError) {
+      await markSessionFailedRetryPending(supabase, sessionId, firefliesId, reason);
+      return NextResponse.json({ ok: true, status: 'failed_retry_pending', reason: 'analysis_provider' });
+    }
+    await markSessionFailed(supabase, sessionId, firefliesId, reason);
     return NextResponse.json({ ok: true, status: 'failed', reason: 'analysis' });
   }
 
@@ -401,14 +408,33 @@ async function markSessionFailed(
   firefliesId: string,
   reason: string,
 ): Promise<void> {
+  return markSessionWithStatus(supabase, sessionId, firefliesId, reason, 'failed');
+}
+
+async function markSessionFailedRetryPending(
+  supabase: SupabaseClient,
+  sessionId: string | undefined,
+  firefliesId: string,
+  reason: string,
+): Promise<void> {
+  return markSessionWithStatus(supabase, sessionId, firefliesId, reason, 'failed_retry_pending');
+}
+
+async function markSessionWithStatus(
+  supabase: SupabaseClient,
+  sessionId: string | undefined,
+  firefliesId: string,
+  reason: string,
+  status: 'failed' | 'failed_retry_pending',
+): Promise<void> {
   if (sessionId) {
     const { error } = await supabase
       .from('therapai_sessions')
-      .update({ status: 'failed', model_used: reason.slice(0, 200) })
+      .update({ status, model_used: reason.slice(0, 200) })
       .eq('id', sessionId);
-          if (error) {
-                    console.error('[webhook][supabase] markSessionFailed update failed', { sessionId, firefliesId, reason, error });
-          }
+    if (error) {
+      console.error(`[webhook][supabase] markSession(${status}) update failed`, { sessionId, firefliesId, reason, error });
+    }
     return;
   }
   const { error } = await supabase
@@ -417,15 +443,15 @@ async function markSessionFailed(
       {
         therapist_id: ANDRE_THERAPIST_ID,
         session_date: new Date().toISOString().slice(0, 10),
-        status: 'failed',
+        status,
         fireflies_id: firefliesId,
         model_used: reason.slice(0, 200),
       },
       { onConflict: 'fireflies_id' },
     );
-    if (error) {
-          console.error('[webhook][supabase] markSessionFailed upsert failed', { firefliesId, reason, error });
-    }
+  if (error) {
+    console.error(`[webhook][supabase] markSession(${status}) upsert failed`, { firefliesId, reason, error });
+  }
 }
 
 async function nextSessionNumberForPatient(supabase: SupabaseClient, patientId: string): Promise<number> {
@@ -437,26 +463,75 @@ async function nextSessionNumberForPatient(supabase: SupabaseClient, patientId: 
 }
 
 // ─── Inference (Claude primary → OpenAI fallback) ─────────────────────────────
+//
+// Provider-error classification:
+//   - credit_balance_too_low / 401 auth / 403 forbidden → fatal for THIS provider; do not retry.
+//   - 429 rate-limit / 5xx / network → transient; retry once with small backoff.
+//
+// When both providers exhaust, throw ProviderError so the caller can mark the session
+// as 'failed_retry_pending' (retryable by rescue script with Codex tier — outside Vercel).
+
+class ProviderError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'ProviderError';
+  }
+}
+
+function isFatalProviderError(err: unknown): boolean {
+  const msg = ((err as Error)?.message ?? '').toLowerCase();
+  if (msg.includes('credit balance') || msg.includes('credit_balance')) return true;
+  if (msg.includes('insufficient_quota')) return true;
+  // Anthropic SDK / OpenAI SDK throw with .status on APIError
+  const status = (err as { status?: number })?.status;
+  if (status === 401 || status === 403) return true;
+  return false;
+}
+
+async function tryProviderWithRetry(
+  label: string,
+  fn: () => Promise<string>,
+): Promise<string> {
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      return await fn();
+    } catch (err) {
+      console.error(`[webhook] ${label} attempt ${attempt + 1} failed`, err);
+      if (isFatalProviderError(err)) {
+        // No point retrying — credit / auth issue.
+        throw err;
+      }
+      if (attempt === 0) {
+        await sleep(800);
+        continue;
+      }
+      throw err;
+    }
+  }
+  throw new Error(`${label}: unreachable`);
+}
+
 async function runAnalysisWithFallback(
   systemPrompt: string,
   userPrompt: string,
 ): Promise<{ text: string; model: string }> {
-  // Try Claude.
-  for (let attempt = 0; attempt < 2; attempt++) {
+  // Try Claude first.
+  try {
+    const text = await tryProviderWithRetry('claude', () => callClaude(systemPrompt, userPrompt));
+    return { text, model: ANTHROPIC_MODEL };
+  } catch (claudeErr) {
+    console.error('[webhook] claude exhausted, falling back to openai', claudeErr);
+    // Fallback to OpenAI.
     try {
-      const text = await callClaude(systemPrompt, userPrompt);
-      return { text, model: ANTHROPIC_MODEL };
-    } catch (err) {
-      console.error(`[webhook] claude attempt ${attempt + 1} failed`, err);
-      if (attempt === 0) {
-        await sleep(800); // small backoff before retry
-        continue;
-      }
+      const text = await tryProviderWithRetry('openai', () => callOpenAI(systemPrompt, userPrompt));
+      return { text, model: OPENAI_MODEL };
+    } catch (openaiErr) {
+      // Both providers failed — surface a typed error so caller can route to failed_retry_pending.
+      const claudeMsg = (claudeErr as Error)?.message ?? 'unknown';
+      const openaiMsg = (openaiErr as Error)?.message ?? 'unknown';
+      throw new ProviderError(`claude: ${claudeMsg} | openai: ${openaiMsg}`);
     }
   }
-  // Fallback to OpenAI.
-  const text = await callOpenAI(systemPrompt, userPrompt);
-  return { text, model: OPENAI_MODEL };
 }
 
 async function callClaude(systemPrompt: string, userPrompt: string): Promise<string> {
