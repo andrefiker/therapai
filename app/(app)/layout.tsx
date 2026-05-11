@@ -1,9 +1,11 @@
 import { createSupabaseServer } from '@/lib/supabase'
 import LogoutButton from '@/components/LogoutButton'
+import { isAdminEmail } from '@/lib/admin'
 
 export default async function AppLayout({ children }: { children: React.ReactNode }) {
   const supabase = await createSupabaseServer()
   const { data: { user } } = await supabase.auth.getUser()
+  const isAdmin = isAdminEmail(user?.email)
 
   return (
     <div className="min-h-screen bg-slate-50">
@@ -17,6 +19,9 @@ export default async function AppLayout({ children }: { children: React.ReactNod
           </a>
           {user && (
             <div className="flex items-center gap-4">
+              {isAdmin && (
+                <a href="/admin/waitlist" className="text-sm text-indigo-600 hover:text-indigo-700 font-medium">Lista de espera</a>
+              )}
               <a href="/settings" className="text-sm text-slate-500 hover:text-slate-900">Configurações</a>
               <span className="text-sm text-slate-500">{user.email}</span>
               <LogoutButton />
