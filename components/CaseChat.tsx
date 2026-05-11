@@ -77,7 +77,7 @@ function renderInlineMd(md: string): string {
     .replace(/\n\n/g, '<br/><br/>')
 }
 
-export function CaseChat({ patientId }: { patientId: string }) {
+export function CaseChat({ patientId, readOnly = false }: { patientId: string; readOnly?: boolean }) {
   const [question, setQuestion] = useState('')
   const [loading, setLoading] = useState(false)
   const [historyLoading, setHistoryLoading] = useState(true)
@@ -142,27 +142,33 @@ export function CaseChat({ patientId }: { patientId: string }) {
         </p>
       </div>
 
-      <form onSubmit={onSubmit} className="mb-4">
-        <textarea
-          value={question}
-          onChange={(e) => setQuestion(e.target.value)}
-          placeholder="Ex: Quais padrões de evitação experiencial apareceram nas últimas 5 sessões?"
-          rows={3}
-          maxLength={2000}
-          disabled={loading}
-          className="w-full border border-slate-200 rounded-lg p-3 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-200 disabled:bg-slate-50"
-        />
-        <div className="flex items-center justify-between mt-2">
-          <span className="text-xs text-slate-400">{question.length} / 2000</span>
-          <button
-            type="submit"
-            disabled={loading || !question.trim()}
-            className="px-4 py-2 rounded-lg bg-indigo-600 text-white text-sm font-medium hover:bg-indigo-700 disabled:bg-slate-300 disabled:cursor-not-allowed transition-colors"
-          >
-            {loading ? 'Pensando…' : 'Perguntar'}
-          </button>
+      {readOnly ? (
+        <div className="mb-4 rounded-lg bg-slate-50 border border-slate-200 p-3 text-sm text-slate-600">
+          Modo demonstração — você pode ler perguntas anteriores abaixo, mas o envio de novas perguntas está desativado.
         </div>
-      </form>
+      ) : (
+        <form onSubmit={onSubmit} className="mb-4">
+          <textarea
+            value={question}
+            onChange={(e) => setQuestion(e.target.value)}
+            placeholder="Ex: Quais padrões de evitação experiencial apareceram nas últimas 5 sessões?"
+            rows={3}
+            maxLength={2000}
+            disabled={loading}
+            className="w-full border border-slate-200 rounded-lg p-3 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-200 disabled:bg-slate-50"
+          />
+          <div className="flex items-center justify-between mt-2">
+            <span className="text-xs text-slate-400">{question.length} / 2000</span>
+            <button
+              type="submit"
+              disabled={loading || !question.trim()}
+              className="px-4 py-2 rounded-lg bg-indigo-600 text-white text-sm font-medium hover:bg-indigo-700 disabled:bg-slate-300 disabled:cursor-not-allowed transition-colors"
+            >
+              {loading ? 'Pensando…' : 'Perguntar'}
+            </button>
+          </div>
+        </form>
+      )}
 
       {error && (
         <div className="mb-4 rounded-lg bg-amber-50 border border-amber-200 p-3 text-sm text-amber-900">

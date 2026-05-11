@@ -13,6 +13,7 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { createSupabaseServer } from '@/lib/supabase';
+import { isOwner } from '@/lib/viewer';
 import Anthropic from '@anthropic-ai/sdk';
 import OpenAI from 'openai';
 
@@ -150,6 +151,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   const supabase = await createSupabaseServer();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return NextResponse.json({ error: 'unauthorized' }, { status: 401 });
+  if (!isOwner(user)) return NextResponse.json({ error: 'forbidden', message: 'Modo demonstração — somente leitura.' }, { status: 403 });
 
   // Pull patient + longitudinal + recent analyses. RLS filters to current user.
   const sessionsToInclude = (() => {

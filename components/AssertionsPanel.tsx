@@ -76,7 +76,7 @@ function dimSortKey(d: string): number {
   return i === -1 ? DIMENSION_ORDER.length : i
 }
 
-export function AssertionsPanel({ patientId }: { patientId: string }) {
+export function AssertionsPanel({ patientId, readOnly = false }: { patientId: string; readOnly?: boolean }) {
   const [data, setData] = useState<MemoryResponse | null>(null)
   const [loading, setLoading] = useState(true)
   const [actingIds, setActingIds] = useState<Set<string>>(new Set())
@@ -254,24 +254,26 @@ export function AssertionsPanel({ patientId }: { patientId: string }) {
                       <span className="text-slate-400 text-xs">{isCollapsed ? '▶' : '▼'}</span>
                       {dimLabel(dim)} <span className="text-xs text-slate-400 font-normal">({rows.length})</span>
                     </button>
-                    <div className="flex gap-2">
-                      <button
-                        onClick={() => bulk(dimIds, 'confirm', dimLabel(dim))}
-                        disabled={dimActing}
-                        className="px-2 py-1 text-xs font-medium rounded bg-green-100 text-green-800 border border-green-200 hover:bg-green-200 disabled:opacity-50"
-                        title={`Confirmar todos os ${rows.length}`}
-                      >
-                        {dimActing ? '…' : `Confirmar todos`}
-                      </button>
-                      <button
-                        onClick={() => bulk(dimIds, 'dismiss', dimLabel(dim))}
-                        disabled={dimActing}
-                        className="px-2 py-1 text-xs font-medium rounded bg-slate-100 text-slate-700 border border-slate-200 hover:bg-slate-200 disabled:opacity-50"
-                        title={`Descartar todos os ${rows.length}`}
-                      >
-                        {dimActing ? '…' : `Descartar todos`}
-                      </button>
-                    </div>
+                    {!readOnly && (
+                      <div className="flex gap-2">
+                        <button
+                          onClick={() => bulk(dimIds, 'confirm', dimLabel(dim))}
+                          disabled={dimActing}
+                          className="px-2 py-1 text-xs font-medium rounded bg-green-100 text-green-800 border border-green-200 hover:bg-green-200 disabled:opacity-50"
+                          title={`Confirmar todos os ${rows.length}`}
+                        >
+                          {dimActing ? '…' : `Confirmar todos`}
+                        </button>
+                        <button
+                          onClick={() => bulk(dimIds, 'dismiss', dimLabel(dim))}
+                          disabled={dimActing}
+                          className="px-2 py-1 text-xs font-medium rounded bg-slate-100 text-slate-700 border border-slate-200 hover:bg-slate-200 disabled:opacity-50"
+                          title={`Descartar todos os ${rows.length}`}
+                        >
+                          {dimActing ? '…' : `Descartar todos`}
+                        </button>
+                      </div>
+                    )}
                   </div>
 
                   {!isCollapsed && (
@@ -295,22 +297,24 @@ export function AssertionsPanel({ patientId }: { patientId: string }) {
                                 </div>
                                 <div className="text-sm text-slate-800">{p.assertion_text}</div>
                               </div>
-                              <div className="flex gap-2 shrink-0">
-                                <button
-                                  onClick={() => act(p.id, 'confirm')}
-                                  disabled={acting}
-                                  className="px-3 py-1 text-xs font-medium rounded bg-green-100 text-green-800 border border-green-200 hover:bg-green-200 disabled:opacity-50"
-                                >
-                                  {acting ? '…' : 'Confirmar'}
-                                </button>
-                                <button
-                                  onClick={() => act(p.id, 'dismiss')}
-                                  disabled={acting}
-                                  className="px-3 py-1 text-xs font-medium rounded bg-slate-100 text-slate-700 border border-slate-200 hover:bg-slate-200 disabled:opacity-50"
-                                >
-                                  {acting ? '…' : 'Descartar'}
-                                </button>
-                              </div>
+                              {!readOnly && (
+                                <div className="flex gap-2 shrink-0">
+                                  <button
+                                    onClick={() => act(p.id, 'confirm')}
+                                    disabled={acting}
+                                    className="px-3 py-1 text-xs font-medium rounded bg-green-100 text-green-800 border border-green-200 hover:bg-green-200 disabled:opacity-50"
+                                  >
+                                    {acting ? '…' : 'Confirmar'}
+                                  </button>
+                                  <button
+                                    onClick={() => act(p.id, 'dismiss')}
+                                    disabled={acting}
+                                    className="px-3 py-1 text-xs font-medium rounded bg-slate-100 text-slate-700 border border-slate-200 hover:bg-slate-200 disabled:opacity-50"
+                                  >
+                                    {acting ? '…' : 'Descartar'}
+                                  </button>
+                                </div>
+                              )}
                             </div>
                           </div>
                         )

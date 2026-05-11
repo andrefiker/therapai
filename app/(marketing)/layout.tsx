@@ -15,6 +15,7 @@ export default function MarketingLayout({ children }: { children: React.ReactNod
             <a href="#como-funciona" className="text-slate-600 hover:text-slate-900 hidden sm:inline">Como funciona</a>
             <a href="#exemplo" className="text-slate-600 hover:text-slate-900 hidden sm:inline">Exemplo</a>
             <a href="#preco" className="text-slate-600 hover:text-slate-900 hidden sm:inline">Preço</a>
+            <Link href="/login" className="text-slate-600 hover:text-slate-900">Entrar</Link>
             <a href="#lista" className="bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors">
               Lista de espera
             </a>

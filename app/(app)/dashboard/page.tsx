@@ -1,35 +1,44 @@
-import { createSupabaseServer } from '@/lib/supabase'
+import { createSupabaseServer, supabaseAdmin } from '@/lib/supabase'
 import { SupabaseClient } from '@supabase/supabase-js'
+import { isOwner, ANDRE_THERAPIST_ID } from '@/lib/viewer'
 import Link from 'next/link'
 
 export const revalidate = 0
 export const dynamic = 'force-dynamic'
 
-// Post-D20 RLS migration: queries run via the authenticated server client.
-// RLS policies (therapist_id = auth.uid()) filter automatically — no app-layer
-// .eq('therapist_id', X) needed. Middleware redirects unauthenticated requests
-// to /login before this page renders.
+// Demo-mode dual-path: owner queries use RLS via auth client; evaluator queries
+// use admin client scoped to ANDRE_THERAPIST_ID so partners reviewing the site
+// see the same view André sees.
 
-async function getStats(supabase: SupabaseClient) {
+async function getStats(supabase: SupabaseClient, scopeToAndre: boolean) {
+  const mk = (table: string) => {
+    const q = supabase.from(table).select('id', { count: 'exact', head: true })
+    return scopeToAndre ? q.eq('therapist_id', ANDRE_THERAPIST_ID) : q
+  }
   const [patients, sessions, analyses] = await Promise.all([
-    supabase.from('therapai_patients').select('id', { count: 'exact', head: true }),
-    supabase.from('therapai_sessions').select('id', { count: 'exact', head: true }),
-    supabase.from('therapai_analyses').select('id', { count: 'exact', head: true }),
+    mk('therapai_patients'),
+    mk('therapai_sessions'),
+    mk('therapai_analyses'),
   ])
   return { patients: patients.count ?? 0, sessions: sessions.count ?? 0, analyses: analyses.count ?? 0 }
 }
 
-async function getPatients(supabase: SupabaseClient) {
-  const { data } = await supabase
+async function getPatients(supabase: SupabaseClient, scopeToAndre: boolean) {
+  let q = supabase
     .from('therapai_patients')
     .select(`id, name, therapai_sessions(id, session_date, status), therapai_longitudinal(sessions_count, period_start, period_end)`)
     .order('name')
+  if (scopeToAndre) q = q.eq('therapist_id', ANDRE_THERAPIST_ID)
+  const { data } = await q
   return data ?? []
 }
 
 export default async function HomePage() {
-  const supabase = await createSupabaseServer()
-  const [stats, patients] = await Promise.all([getStats(supabase), getPatients(supabase)])
+  const authClient = await createSupabaseServer()
+  const { data: { user } } = await authClient.auth.getUser()
+  const owner = isOwner(user)
+  const supabase: SupabaseClient = owner ? authClient : supabaseAdmin
+  const [stats, patients] = await Promise.all([getStats(supabase, !owner), getPatients(supabase, !owner)])
 
   const withLongitudinal = patients.filter((p: any) => p.therapai_longitudinal?.length > 0)
   const pending = patients.filter((p: any) => !p.therapai_longitudinal?.length)

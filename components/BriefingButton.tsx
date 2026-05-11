@@ -26,7 +26,7 @@ function renderInlineMd(md: string): string {
     .replace(/\n\n/g, '<br/><br/>')
 }
 
-export function BriefingButton({ patientId }: { patientId: string }) {
+export function BriefingButton({ patientId, readOnly = false }: { patientId: string; readOnly?: boolean }) {
   const [loading, setLoading] = useState(false)
   const [result, setResult] = useState<BriefingResponse | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -60,13 +60,17 @@ export function BriefingButton({ patientId }: { patientId: string }) {
           <h2 className="text-base font-semibold text-slate-900">Briefing pré-sessão</h2>
           <p className="text-xs text-slate-500 mt-0.5">Síntese de 8 seções a partir das últimas análises + relatório longitudinal.</p>
         </div>
-        <button
-          onClick={generate}
-          disabled={loading}
-          className="px-4 py-2 rounded-lg bg-indigo-600 text-white text-sm font-medium hover:bg-indigo-700 disabled:bg-slate-300 disabled:cursor-not-allowed transition-colors"
-        >
-          {loading ? 'Gerando…' : (result ? 'Gerar novamente' : 'Preparar próxima sessão')}
-        </button>
+        {readOnly ? (
+          <span className="text-xs text-slate-500 bg-slate-100 border border-slate-200 px-2.5 py-1 rounded-full">Modo demonstração — somente leitura</span>
+        ) : (
+          <button
+            onClick={generate}
+            disabled={loading}
+            className="px-4 py-2 rounded-lg bg-indigo-600 text-white text-sm font-medium hover:bg-indigo-700 disabled:bg-slate-300 disabled:cursor-not-allowed transition-colors"
+          >
+            {loading ? 'Gerando…' : (result ? 'Gerar novamente' : 'Preparar próxima sessão')}
+          </button>
+        )}
       </div>
 
       {error && (

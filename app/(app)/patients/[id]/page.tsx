@@ -1,4 +1,5 @@
-import { createSupabaseServer } from '@/lib/supabase'
+import { createSupabaseServer, supabaseAdmin } from '@/lib/supabase'
+import { isOwner, ANDRE_THERAPIST_ID } from '@/lib/viewer'
 import { BriefingButton } from '@/components/BriefingButton'
 import { AssertionsPanel } from '@/components/AssertionsPanel'
 import { CaseChat } from '@/components/CaseChat'
@@ -7,10 +8,13 @@ import Link from 'next/link'
 export const revalidate = 0
 export const dynamic = 'force-dynamic'
 
-// Post-D20 RLS: query via authenticated server client; RLS filters by therapist_id automatically.
-async function getPatient(id: string) {
-  const supabase = await createSupabaseServer()
-  const { data, error } = await supabase
+// Demo-mode dual-path (see lib/viewer.ts): owner uses RLS, evaluator uses
+// admin client scoped to ANDRE_THERAPIST_ID.
+async function getPatient(id: string, scopeToAndre: boolean) {
+  const supabase = scopeToAndre
+    ? supabaseAdmin
+    : await createSupabaseServer()
+  let q = supabase
     .from('therapai_patients')
     .select(`
       id, name, notes, created_at,
@@ -25,7 +29,8 @@ async function getPatient(id: string) {
     `)
     .eq('id', id)
     .limit(1)
-
+  if (scopeToAndre) q = q.eq('therapist_id', ANDRE_THERAPIST_ID)
+  const { data, error } = await q
   if (error || !data || data.length === 0) return null
   return data[0]
 }
@@ -50,7 +55,10 @@ function MarkdownViewer({ md }: { md: string }) {
 
 export default async function PatientPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params
-  const patient = await getPatient(id)
+  const authClient = await createSupabaseServer()
+  const { data: { user } } = await authClient.auth.getUser()
+  const owner = isOwner(user)
+  const patient = await getPatient(id, !owner)
 
   if (!patient) {
     return (
@@ -109,9 +117,9 @@ export default async function PatientPage({ params }: { params: Promise<{ id: st
         </div>
 
         <div className="col-span-2 space-y-6">
-          <CaseChat patientId={patient.id} />
-          <AssertionsPanel patientId={patient.id} />
-          <BriefingButton patientId={patient.id} />
+          <CaseChat patientId={patient.id} readOnly={!owner} />
+          <AssertionsPanel patientId={patient.id} readOnly={!owner} />
+          <BriefingButton patientId={patient.id} readOnly={!owner} />
 
           {longitudinal && (
             <div className="bg-white rounded-xl border border-slate-200 p-6">

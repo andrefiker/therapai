@@ -9,7 +9,8 @@
 // queries return empty rows → response shows nothing → 404 returned to client.
 
 import { NextRequest, NextResponse } from 'next/server';
-import { createSupabaseServer } from '@/lib/supabase';
+import { createSupabaseServer, supabaseAdmin } from '@/lib/supabase';
+import { isOwner, ANDRE_THERAPIST_ID } from '@/lib/viewer';
 
 export const runtime = 'nodejs';
 export const revalidate = 0;
@@ -19,16 +20,17 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
   const { id: patientId } = await params;
   if (!patientId) return NextResponse.json({ error: 'missing_patient_id' }, { status: 400 });
 
-  const supabase = await createSupabaseServer();
-  const { data: { user } } = await supabase.auth.getUser();
+  const authClient = await createSupabaseServer();
+  const { data: { user } } = await authClient.auth.getUser();
   if (!user) return NextResponse.json({ error: 'unauthorized' }, { status: 401 });
 
-  // Confirm patient is visible (RLS will hide it otherwise).
-  const { data: patient } = await supabase
-    .from('therapai_patients')
-    .select('id, name')
-    .eq('id', patientId)
-    .maybeSingle();
+  // Demo mode: evaluators read André's data via admin client scoped to ANDRE_THERAPIST_ID.
+  const owner = isOwner(user);
+  const supabase = owner ? authClient : supabaseAdmin;
+
+  let pq = supabase.from('therapai_patients').select('id, name').eq('id', patientId);
+  if (!owner) pq = pq.eq('therapist_id', ANDRE_THERAPIST_ID);
+  const { data: patient } = await pq.maybeSingle();
   if (!patient) return NextResponse.json({ error: 'not_found' }, { status: 404 });
 
   // Confirmed state via the SQL function.
