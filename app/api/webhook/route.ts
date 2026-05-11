@@ -208,12 +208,20 @@ const LONGITUDINAL_SYSTEM_PROMPT = `Você é um clínico especialista em Anális
 Análise longitudinal rigorosa, em português brasileiro técnico, sintetizando todas as sessões anteriores deste paciente.
 Sem preambles.
 
+DISCIPLINA TEMPORAL OBRIGATÓRIA:
+As sessões abaixo são apresentadas em ordem cronológica com data explícita no cabeçalho de cada bloco. Sua análise DEVE preservar essa estrutura temporal:
+- Refira-se a sessões por data (ex: "na sessão de 14/03/2026") ou por janela temporal ("nas primeiras 4 sessões de março", "no período pós-interrupção de 6 semanas em fevereiro").
+- Gaps prolongados entre sessões (marcados com ⚠) são fatos clínicos: interrupções, recaídas, retomadas. Comente quando relevantes.
+- Distinga padrões ESTÁVEIS (presentes em múltiplos momentos do tratamento) de MUDANÇAS (apareceram em data X, evoluíram em data Y).
+- Em "Movimentos de Mudança" (seção 3), ancore cada movimento em quando começou e em que sessão se consolidou.
+- Em "Estado Atual" (seção 5), reflita o que está vivo nas sessões MAIS RECENTES, não a média do período inteiro.
+
 Seções obrigatórias:
-1. Trajetória do Caso
-2. Padrões Comportamentais Estáveis
-3. Movimentos de Mudança
-4. Análise RFT Longitudinal
-5. Estado Atual
+1. Trajetória do Caso (linha do tempo clínica — datas chave + janelas)
+2. Padrões Comportamentais Estáveis (com sinalização da janela em que aparecem)
+3. Movimentos de Mudança (data-de-início + data-de-consolidação por movimento)
+4. Análise RFT Longitudinal (molduras dominantes em cada fase do tratamento)
+5. Estado Atual (apenas o que está vivo nas sessões mais recentes)
 6. Vetores de Intervenção Prioritários
 7. Prognóstico Atualizado
 8. Indicadores de Alta / Reavaliação`;
@@ -774,14 +782,45 @@ ${meta}
 ${transcriptText}`;
 }
 
-function buildLongitudinalUserPrompt(patientName: string, analyses: { session_number: number | null; analysis_md: string | null; }[]): string {
-  const sorted = [...analyses].sort((a, b) => (a.session_number ?? 0) - (b.session_number ?? 0));
-  const body = sorted
-    .map((a) => `=== Sessão ${a.session_number ?? '?'} ===\n${a.analysis_md ?? ''}`)
-    .join('\n\n');
-  return `Análises de sessão para ${patientName} abaixo. Sintetize a análise longitudinal completa nas 8 seções obrigatórias.
+function buildLongitudinalUserPrompt(
+  patientName: string,
+  analyses: { session_number: number | null; analysis_md: string | null; session_date?: string | null; }[],
+): string {
+  // Sort chronologically by session_date (falls back to session_number when date is missing).
+  // The dated header on each block lets the model anchor temporal claims and read gaps
+  // between sessions — without it the longitudinal reads as a flat list.
+  const sorted = [...analyses].sort((a, b) => {
+    const da = a.session_date ?? '';
+    const db = b.session_date ?? '';
+    if (da && db && da !== db) return da.localeCompare(db);
+    return (a.session_number ?? 0) - (b.session_number ?? 0);
+  });
 
-${body}`;
+  const blocks: string[] = [];
+  for (let i = 0; i < sorted.length; i++) {
+    const a = sorted[i];
+    const num = a.session_number ?? '?';
+    const date = a.session_date ?? '(sem data)';
+    let gapNote = '';
+    if (i > 0) {
+      const prev = sorted[i - 1].session_date;
+      if (prev && a.session_date) {
+        const days = Math.round((new Date(a.session_date).getTime() - new Date(prev).getTime()) / 86_400_000);
+        if (days >= 14) gapNote = ` · ⚠ ${days}d desde a sessão anterior`;
+        else if (days > 0) gapNote = ` · +${days}d`;
+      }
+    }
+    blocks.push(`=== Sessão ${num} · ${date}${gapNote} ===\n${a.analysis_md ?? ''}`);
+  }
+
+  const span = sorted.length > 0 && sorted[0].session_date && sorted[sorted.length - 1].session_date
+    ? `${sorted[0].session_date} → ${sorted[sorted.length - 1].session_date} (${sorted.length} sessões)`
+    : `${sorted.length} sessões`;
+
+  return `Análises de sessão para ${patientName} abaixo, em ordem cronológica (${span}).
+Sintetize a análise longitudinal completa nas 8 seções obrigatórias. Cada afirmação clínica que faça referência temporal deve ancorar-se na data da(s) sessão(ões) correspondente(s) — não trate as sessões como uma lista plana. Gaps longos entre sessões (sinalizados com ⚠) são clinicamente relevantes (interrupções, recaídas, retomadas).
+
+${blocks.join('\n\n')}`;
 }
 
 // ─── D25 F2+F5 assertion extraction ──────────────────────────────────────────
@@ -1127,19 +1166,30 @@ async function rebuildLongitudinalForPatient(supabase: SupabaseClient, patientId
 
   const { data: analyses } = await supabase
     .from('therapai_analyses')
-    .select('session_number, analysis_md, created_at')
+    .select('session_number, analysis_md, created_at, therapai_sessions(session_date)')
     .eq('patient_id', patientId);
   if (!analyses || analyses.length === 0) return;
 
+  // Flatten the nested session_date so the prompt builder can consume it.
+  const withDate = analyses.map((a) => {
+    const sess = (a as { therapai_sessions?: { session_date?: string | null } | Array<{ session_date?: string | null }> | null }).therapai_sessions;
+    const session_date = Array.isArray(sess) ? sess[0]?.session_date ?? null : sess?.session_date ?? null;
+    return {
+      session_number: a.session_number as number | null,
+      analysis_md: a.analysis_md as string | null,
+      session_date: (session_date as string | null) ?? null,
+    };
+  });
+
   const result = await runAnalysisWithFallback(
     LONGITUDINAL_SYSTEM_PROMPT,
-    buildLongitudinalUserPrompt(patient.name, analyses),
+    buildLongitudinalUserPrompt(patient.name, withDate),
   );
 
-  const dates = analyses
-    .map((a) => a.created_at as string | null)
-    .filter((d): d is string => !!d)
-    .sort();
+  // Period markers come from real session dates (fall back to analysis created_at if missing).
+  const sessionDates = withDate.map((a) => a.session_date).filter((d): d is string => !!d).sort();
+  const createdAtDates = analyses.map((a) => a.created_at as string | null).filter((d): d is string => !!d).sort();
+  const dates = sessionDates.length > 0 ? sessionDates : createdAtDates;
   const periodStart = dates[0]?.slice(0, 10) ?? null;
   const periodEnd = dates[dates.length - 1]?.slice(0, 10) ?? null;
 
