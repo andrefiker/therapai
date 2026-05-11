@@ -42,9 +42,10 @@ export default function MarketingLayout({ children }: { children: React.ReactNod
             <div>
               <div className="font-semibold text-slate-900 mb-2">Conformidade</div>
               <ul className="space-y-1">
-                <li>Prontuário psicológico (CFP Resolução 11/2018)</li>
-                <li>LGPD — dados em infra brasileira</li>
-                <li>Acesso por link mágico, sem senhas</li>
+                <li><Link href="/privacidade" className="hover:text-slate-900">Política de Privacidade</Link></li>
+                <li><Link href="/termos" className="hover:text-slate-900">Termos de Uso</Link></li>
+                <li><Link href="/dpa" className="hover:text-slate-900">Acordo de Tratamento de Dados</Link></li>
+                <li className="text-slate-400 text-xs pt-1">Prontuário CFP 11/2018 · LGPD · infra Brasil</li>
               </ul>
             </div>
             <div>

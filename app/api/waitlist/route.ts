@@ -11,7 +11,7 @@ import { createHash } from 'node:crypto';
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
-interface Body { email?: string; name?: string; crp?: string; notes?: string }
+interface Body { email?: string; name?: string; crp?: string; notes?: string; consent?: boolean }
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
@@ -28,6 +28,10 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   const crp = clip(body.crp, 40);
   const notes = clip(body.notes, 500);
 
+  if (body.consent !== true) {
+    return NextResponse.json({ error: 'consent_required', message: 'Aceite dos termos é obrigatório.' }, { status: 400 });
+  }
+
   const supabase = createServerClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
@@ -38,6 +42,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   const ipHash = ip ? createHash('sha256').update(ip).digest('hex').slice(0, 32) : null;
   const userAgent = clip(req.headers.get('user-agent'), 300);
 
+  const now = new Date().toISOString();
   const { error } = await supabase.from('therapai_waitlist').insert({
     email,
     name: name || null,
@@ -45,6 +50,9 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     notes: notes || null,
     user_agent: userAgent || null,
     ip_hash: ipHash,
+    consent_terms_at: now,
+    consent_privacy_at: now,
+    consent_dpa_at: now,
   });
 
   if (error) {

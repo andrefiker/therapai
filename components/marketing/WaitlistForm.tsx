@@ -7,6 +7,7 @@ export function WaitlistForm() {
   const [name, setName] = useState('')
   const [crp, setCrp] = useState('')
   const [notes, setNotes] = useState('')
+  const [consent, setConsent] = useState(false)
   const [submitting, setSubmitting] = useState(false)
   const [done, setDone] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -14,13 +15,17 @@ export function WaitlistForm() {
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault()
     if (!email.trim()) return
+    if (!consent) {
+      setError('Você precisa aceitar os Termos de Uso, a Política de Privacidade e o DPA para entrar na lista.')
+      return
+    }
     setSubmitting(true)
     setError(null)
     try {
       const res = await fetch('/api/waitlist', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email: email.trim(), name: name.trim(), crp: crp.trim(), notes: notes.trim() }),
+        body: JSON.stringify({ email: email.trim(), name: name.trim(), crp: crp.trim(), notes: notes.trim(), consent: true }),
       })
       if (!res.ok) {
         const json = await res.json().catch(() => ({})) as { message?: string }
@@ -67,10 +72,26 @@ export function WaitlistForm() {
           className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-200"
         />
       </div>
+      <label className="flex items-start gap-3 text-sm text-slate-600 cursor-pointer">
+        <input
+          type="checkbox"
+          checked={consent}
+          onChange={(e) => setConsent(e.target.checked)}
+          className="mt-0.5 h-4 w-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
+        />
+        <span>
+          Li e aceito os{' '}
+          <a href="/termos" target="_blank" rel="noopener" className="text-indigo-600 hover:text-indigo-700 underline">Termos de Uso</a>,
+          a{' '}
+          <a href="/privacidade" target="_blank" rel="noopener" className="text-indigo-600 hover:text-indigo-700 underline">Política de Privacidade</a>{' '}
+          e o{' '}
+          <a href="/dpa" target="_blank" rel="noopener" className="text-indigo-600 hover:text-indigo-700 underline">Acordo de Tratamento de Dados</a>.
+        </span>
+      </label>
       {error && <div className="text-sm text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">{error}</div>}
       <button
         type="submit"
-        disabled={submitting || !email.trim()}
+        disabled={submitting || !email.trim() || !consent}
         className="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-medium px-5 py-3 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
       >
         {submitting ? 'Enviando…' : 'Entrar na lista'}
