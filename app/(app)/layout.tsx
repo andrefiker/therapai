@@ -17,6 +17,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
           </a>
           {user && (
             <div className="flex items-center gap-4">
+              <a href="/settings" className="text-sm text-slate-500 hover:text-slate-900">Configurações</a>
               <span className="text-sm text-slate-500">{user.email}</span>
               <LogoutButton />
             </div>

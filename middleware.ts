@@ -35,6 +35,7 @@ export async function middleware(request: NextRequest) {
     pathname.startsWith('/api/auth') ||
     pathname.startsWith('/api/webhook') ||
     pathname.startsWith('/api/waitlist') ||
+    pathname.startsWith('/api/stripe/webhook') ||
     pathname.startsWith('/_next') ||
     pathname.startsWith('/favicon')
 
