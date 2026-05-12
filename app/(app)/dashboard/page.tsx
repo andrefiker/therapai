@@ -1,19 +1,20 @@
 import { createSupabaseServer, supabaseAdmin } from '@/lib/supabase'
 import { SupabaseClient } from '@supabase/supabase-js'
-import { isOwner, ANDRE_THERAPIST_ID } from '@/lib/viewer'
+import { isOwner, SYNTHETIC_THERAPIST_ID } from '@/lib/viewer'
 import Link from 'next/link'
 
 export const revalidate = 0
 export const dynamic = 'force-dynamic'
 
 // Demo-mode dual-path: owner queries use RLS via auth client; evaluator queries
-// use admin client scoped to ANDRE_THERAPIST_ID so partners reviewing the site
-// see the same view André sees.
+// use admin client scoped to SYNTHETIC_THERAPIST_ID so partners reviewing the
+// site see only the synthetic demo tenant (Dra. Demo), never André's real data.
+// LGPD pivot 2026-05-12 (ISA therapai-lgpd-compliance F2).
 
-async function getStats(supabase: SupabaseClient, scopeToAndre: boolean) {
+async function getStats(supabase: SupabaseClient, scopeToDemo: boolean) {
   const mk = (table: string) => {
     const q = supabase.from(table).select('id', { count: 'exact', head: true })
-    return scopeToAndre ? q.eq('therapist_id', ANDRE_THERAPIST_ID) : q
+    return scopeToDemo ? q.eq('therapist_id', SYNTHETIC_THERAPIST_ID) : q
   }
   const [patients, sessions, analyses] = await Promise.all([
     mk('therapai_patients'),
@@ -23,12 +24,12 @@ async function getStats(supabase: SupabaseClient, scopeToAndre: boolean) {
   return { patients: patients.count ?? 0, sessions: sessions.count ?? 0, analyses: analyses.count ?? 0 }
 }
 
-async function getPatients(supabase: SupabaseClient, scopeToAndre: boolean) {
+async function getPatients(supabase: SupabaseClient, scopeToDemo: boolean) {
   let q = supabase
     .from('therapai_patients')
     .select(`id, name, therapai_sessions(id, session_date, status), therapai_longitudinal(sessions_count, period_start, period_end)`)
     .order('name')
-  if (scopeToAndre) q = q.eq('therapist_id', ANDRE_THERAPIST_ID)
+  if (scopeToDemo) q = q.eq('therapist_id', SYNTHETIC_THERAPIST_ID)
   const { data } = await q
   return data ?? []
 }

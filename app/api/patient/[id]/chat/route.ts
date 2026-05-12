@@ -11,7 +11,7 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { createSupabaseServer, supabaseAdmin } from '@/lib/supabase';
-import { isOwner, ANDRE_THERAPIST_ID } from '@/lib/viewer';
+import { isOwner, SYNTHETIC_THERAPIST_ID } from '@/lib/viewer';
 import Anthropic from '@anthropic-ai/sdk';
 import OpenAI from 'openai';
 
@@ -34,11 +34,12 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
   const { data: { user } } = await authClient.auth.getUser();
   if (!user) return NextResponse.json({ error: 'unauthorized' }, { status: 401 });
 
-  // Demo mode: evaluators read André's history via admin client.
+  // Demo mode: evaluators read the synthetic tenant (Dra. Demo) via admin client.
+  // LGPD pivot 2026-05-12 (ISA therapai-lgpd-compliance F2) — no real-patient leak.
   const owner = isOwner(user);
   const supabase = owner ? authClient : supabaseAdmin;
   let pq = supabase.from('therapai_patients').select('id').eq('id', patientId);
-  if (!owner) pq = pq.eq('therapist_id', ANDRE_THERAPIST_ID);
+  if (!owner) pq = pq.eq('therapist_id', SYNTHETIC_THERAPIST_ID);
   const { data: patient } = await pq.maybeSingle();
   if (!patient) return NextResponse.json({ error: 'not_found' }, { status: 404 });
 

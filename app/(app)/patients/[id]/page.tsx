@@ -1,5 +1,5 @@
 import { createSupabaseServer, supabaseAdmin } from '@/lib/supabase'
-import { isOwner, ANDRE_THERAPIST_ID } from '@/lib/viewer'
+import { isOwner, SYNTHETIC_THERAPIST_ID } from '@/lib/viewer'
 import { BriefingButton } from '@/components/BriefingButton'
 import { AssertionsPanel } from '@/components/AssertionsPanel'
 import { CaseChat } from '@/components/CaseChat'
@@ -9,9 +9,10 @@ export const revalidate = 0
 export const dynamic = 'force-dynamic'
 
 // Demo-mode dual-path (see lib/viewer.ts): owner uses RLS, evaluator uses
-// admin client scoped to ANDRE_THERAPIST_ID.
-async function getPatient(id: string, scopeToAndre: boolean) {
-  const supabase = scopeToAndre
+// admin client scoped to SYNTHETIC_THERAPIST_ID (Dra. Demo mock tenant).
+// LGPD pivot 2026-05-12 (ISA therapai-lgpd-compliance F2).
+async function getPatient(id: string, scopeToDemo: boolean) {
+  const supabase = scopeToDemo
     ? supabaseAdmin
     : await createSupabaseServer()
   let q = supabase
@@ -29,7 +30,7 @@ async function getPatient(id: string, scopeToAndre: boolean) {
     `)
     .eq('id', id)
     .limit(1)
-  if (scopeToAndre) q = q.eq('therapist_id', ANDRE_THERAPIST_ID)
+  if (scopeToDemo) q = q.eq('therapist_id', SYNTHETIC_THERAPIST_ID)
   const { data, error } = await q
   if (error || !data || data.length === 0) return null
   return data[0]
