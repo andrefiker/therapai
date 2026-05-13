@@ -1,5 +1,5 @@
 import { createSupabaseServer } from '@/lib/supabase'
-import { isOwner } from '@/lib/viewer'
+import { isAdminEmail } from '@/lib/admin'
 import { audit } from '@/lib/audit'
 import Link from 'next/link'
 
@@ -68,13 +68,13 @@ export default async function ClinicalLibraryPage() {
   const supabase = await createSupabaseServer()
   const { data: { user } } = await supabase.auth.getUser()
 
-  if (!isOwner(user)) {
+  if (!isAdminEmail(user?.email)) {
     return (
       <div className="bg-amber-50 border border-amber-200 rounded-xl p-6">
-        <h1 className="text-lg font-semibold text-amber-900 mb-2">Biblioteca clínica indisponível em demo</h1>
+        <h1 className="text-lg font-semibold text-amber-900 mb-2">Biblioteca clínica indisponível</h1>
         <p className="text-sm text-amber-800">
-          A biblioteca de teoria clínica é específica do tenant operador e não é exposta em modo de avaliação.
-          O conteúdo é restrito por RLS ao clínico autenticado como proprietário.
+          A biblioteca de teoria clínica é mantida pelo operador. Conteúdo aguardando exposição
+          paramétrica por linha clínica em release futuro.
         </p>
         <Link href="/dashboard" className="inline-block mt-3 text-sm text-amber-900 underline">← Voltar ao dashboard</Link>
       </div>

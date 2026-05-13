@@ -10,8 +10,8 @@
 // document-quote extraction beyond what the model emits inline.
 
 import { NextRequest, NextResponse } from 'next/server';
-import { createSupabaseServer, supabaseAdmin } from '@/lib/supabase';
-import { isOwner, SYNTHETIC_THERAPIST_ID } from '@/lib/viewer';
+import { createSupabaseServer } from '@/lib/supabase';
+import { getTherapist } from '@/lib/viewer';
 import { audit, extractClientIp } from '@/lib/audit';
 import Anthropic from '@anthropic-ai/sdk';
 import OpenAI from 'openai';
@@ -31,17 +31,16 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
   const { id: patientId } = await params;
   if (!patientId) return NextResponse.json({ error: 'missing_patient_id' }, { status: 400 });
 
-  const authClient = await createSupabaseServer();
-  const { data: { user } } = await authClient.auth.getUser();
+  const supabase = await createSupabaseServer();
+  const { data: { user } } = await supabase.auth.getUser();
   if (!user) return NextResponse.json({ error: 'unauthorized' }, { status: 401 });
 
-  // Demo mode: evaluators read the synthetic tenant (Dra. Demo) via admin client.
-  // LGPD pivot 2026-05-12 (ISA therapai-lgpd-compliance F2) — no real-patient leak.
-  const owner = isOwner(user);
-  const supabase = owner ? authClient : supabaseAdmin;
-  let pq = supabase.from('therapai_patients').select('id').eq('id', patientId);
-  if (!owner) pq = pq.eq('therapist_id', SYNTHETIC_THERAPIST_ID);
-  const { data: patient } = await pq.maybeSingle();
+  // RLS scopes to therapist_id = auth.uid().
+  const { data: patient } = await supabase
+    .from('therapai_patients')
+    .select('id')
+    .eq('id', patientId)
+    .maybeSingle();
   if (!patient) return NextResponse.json({ error: 'not_found' }, { status: 404 });
 
   const { data: history } = await supabase
@@ -96,7 +95,8 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   const supabase = await createSupabaseServer();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return NextResponse.json({ error: 'unauthorized' }, { status: 401 });
-  if (!isOwner(user)) return NextResponse.json({ error: 'forbidden', message: 'Modo demonstração — somente leitura.' }, { status: 403 });
+  const therapist = await getTherapist(supabase, user);
+  if (!therapist) return NextResponse.json({ error: 'forbidden', message: 'Tenant não provisionado.' }, { status: 403 });
 
   // Confirm patient is visible to caller (RLS handles ownership)
   const { data: patient } = await supabase

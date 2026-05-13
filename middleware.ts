@@ -38,8 +38,13 @@ export async function middleware(request: NextRequest) {
     pathname === '/dpa' ||
     pathname.startsWith('/login') ||
     pathname.startsWith('/api/') ||
+    pathname.startsWith('/demo') ||
     pathname.startsWith('/_next') ||
     pathname.startsWith('/favicon')
+
+  // /onboarding lives outside (app)/ — it's the page where a tenant row gets
+  // created, so it can't require a tenant row to enter. Middleware enforces
+  // auth only; the page itself checks invite status.
 
   if (isPublic) return supabaseResponse
 

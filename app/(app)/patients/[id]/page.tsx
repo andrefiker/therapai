@@ -1,22 +1,17 @@
-import { createSupabaseServer, supabaseAdmin } from '@/lib/supabase'
-import { isOwner, SYNTHETIC_THERAPIST_ID } from '@/lib/viewer'
+import { createSupabaseServer } from '@/lib/supabase'
 import { audit } from '@/lib/audit'
 import { BriefingButton } from '@/components/BriefingButton'
 import { AssertionsPanel } from '@/components/AssertionsPanel'
 import { CaseChat } from '@/components/CaseChat'
 import Link from 'next/link'
+import type { SupabaseClient } from '@supabase/supabase-js'
 
 export const revalidate = 0
 export const dynamic = 'force-dynamic'
 
-// Demo-mode dual-path (see lib/viewer.ts): owner uses RLS, evaluator uses
-// admin client scoped to SYNTHETIC_THERAPIST_ID (Dra. Demo mock tenant).
-// LGPD pivot 2026-05-12 (ISA therapai-lgpd-compliance F2).
-async function getPatient(id: string, scopeToDemo: boolean) {
-  const supabase = scopeToDemo
-    ? supabaseAdmin
-    : await createSupabaseServer()
-  let q = supabase
+// Multi-tenant pure: RLS scopes to therapist_id = auth.uid().
+async function getPatient(supabase: SupabaseClient, id: string) {
+  const { data, error } = await supabase
     .from('therapai_patients')
     .select(`
       id, name, notes, created_at,
@@ -31,8 +26,6 @@ async function getPatient(id: string, scopeToDemo: boolean) {
     `)
     .eq('id', id)
     .limit(1)
-  if (scopeToDemo) q = q.eq('therapist_id', SYNTHETIC_THERAPIST_ID)
-  const { data, error } = await q
   if (error || !data || data.length === 0) return null
   return data[0]
 }
@@ -57,10 +50,9 @@ function MarkdownViewer({ md }: { md: string }) {
 
 export default async function PatientPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params
-  const authClient = await createSupabaseServer()
-  const { data: { user } } = await authClient.auth.getUser()
-  const owner = isOwner(user)
-  const patient = await getPatient(id, !owner)
+  const supabase = await createSupabaseServer()
+  const { data: { user } } = await supabase.auth.getUser()
+  const patient = await getPatient(supabase, id)
 
   if (!patient) {
     return (
@@ -72,12 +64,11 @@ export default async function PatientPage({ params }: { params: Promise<{ id: st
   }
 
   if (user) {
-    audit(authClient, user.id, {
+    audit(supabase, user.id, {
       action: 'viewed_patient',
       target_table: 'therapai_patients',
       target_row_id: patient.id,
       context: {
-        tenant: owner ? 'real' : 'synthetic',
         sessions_count: (patient.therapai_sessions ?? []).length,
         has_longitudinal: (patient.therapai_longitudinal ?? []).length > 0,
       },
@@ -132,9 +123,9 @@ export default async function PatientPage({ params }: { params: Promise<{ id: st
         </div>
 
         <div className="col-span-2 space-y-6">
-          <CaseChat patientId={patient.id} readOnly={!owner} />
-          <AssertionsPanel patientId={patient.id} readOnly={!owner} />
-          <BriefingButton patientId={patient.id} readOnly={!owner} />
+          <CaseChat patientId={patient.id} readOnly={false} />
+          <AssertionsPanel patientId={patient.id} readOnly={false} />
+          <BriefingButton patientId={patient.id} readOnly={false} />
 
           {longitudinal && (
             <div className="bg-white rounded-xl border border-slate-200 p-6">

@@ -24,7 +24,7 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { createSupabaseServer, supabaseAdmin } from '@/lib/supabase';
-import { isOwner } from '@/lib/viewer';
+import { getTherapist } from '@/lib/viewer';
 import { audit, extractClientIp } from '@/lib/audit';
 
 export const runtime = 'nodejs';
@@ -37,8 +37,9 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   const authClient = await createSupabaseServer();
   const { data: { user } } = await authClient.auth.getUser();
   if (!user) return NextResponse.json({ error: 'unauthorized' }, { status: 401 });
-  if (!isOwner(user)) {
-    return NextResponse.json({ error: 'forbidden', message: 'Apenas o controlador (operador) pode executar a eliminação Art. 18.' }, { status: 403 });
+  const therapist = await getTherapist(authClient, user);
+  if (!therapist) {
+    return NextResponse.json({ error: 'forbidden', message: 'Tenant não provisionado.' }, { status: 403 });
   }
 
   // Confirm the patient belongs to this therapist before deleting anything.

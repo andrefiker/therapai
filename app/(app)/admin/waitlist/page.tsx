@@ -16,6 +16,7 @@ interface WaitlistRow {
   consent_terms_at: string | null
   consent_privacy_at: string | null
   consent_dpa_at: string | null
+  invited_at: string | null
   promoted: boolean
 }
 
@@ -30,7 +31,7 @@ export default async function AdminWaitlistPage() {
   // Fetch waitlist + existing therapists (to mark already-promoted entries).
   const [{ data: waitlist }, { data: therapists }] = await Promise.all([
     supabase.from('therapai_waitlist')
-      .select('id, email, name, crp, notes, created_at, consent_terms_at, consent_privacy_at, consent_dpa_at')
+      .select('id, email, name, crp, notes, created_at, consent_terms_at, consent_privacy_at, consent_dpa_at, invited_at')
       .order('created_at', { ascending: false }),
     supabase.from('therapai_therapists').select('email'),
   ])
@@ -101,7 +102,7 @@ function WaitlistCard({ row }: { row: WaitlistRow }) {
             <span>{consents}/3 consentimentos</span>
           </div>
         </div>
-        <ApproveWaitlistButton waitlistId={row.id} email={row.email} name={row.name ?? ''} />
+        <ApproveWaitlistButton waitlistId={row.id} email={row.email} name={row.name ?? ''} invited={!!row.invited_at} />
       </div>
       {row.notes && (
         <div className="text-sm text-slate-600 bg-slate-50 border border-slate-100 rounded-lg p-3 mt-2 whitespace-pre-wrap">

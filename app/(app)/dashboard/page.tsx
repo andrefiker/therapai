@@ -1,56 +1,46 @@
-import { createSupabaseServer, supabaseAdmin } from '@/lib/supabase'
-import { SupabaseClient } from '@supabase/supabase-js'
-import { isOwner, SYNTHETIC_THERAPIST_ID } from '@/lib/viewer'
+import { createSupabaseServer } from '@/lib/supabase'
 import { audit } from '@/lib/audit'
 import Link from 'next/link'
 
 export const revalidate = 0
 export const dynamic = 'force-dynamic'
 
-// Demo-mode dual-path: owner queries use RLS via auth client; evaluator queries
-// use admin client scoped to SYNTHETIC_THERAPIST_ID so partners reviewing the
-// site see only the synthetic demo tenant (Dra. Demo), never André's real data.
-// LGPD pivot 2026-05-12 (ISA therapai-lgpd-compliance F2).
+// Multi-tenant pure: RLS scopes every query to therapist_id = auth.uid().
+// No demo branching here — the synthetic Dra. Demo tenant is served separately
+// at /demo/* via supabaseAdmin (see app/(demo)/).
 
-async function getStats(supabase: SupabaseClient, scopeToDemo: boolean) {
-  const mk = (table: string) => {
-    const q = supabase.from(table).select('id', { count: 'exact', head: true })
-    return scopeToDemo ? q.eq('therapist_id', SYNTHETIC_THERAPIST_ID) : q
-  }
-  const [patients, sessions, analyses] = await Promise.all([
+export default async function HomePage() {
+  const supabase = await createSupabaseServer()
+  const { data: { user } } = await supabase.auth.getUser()
+  // Layout already gated this route on a therapai_therapists row existing.
+
+  const mk = (table: string) => supabase.from(table).select('id', { count: 'exact', head: true })
+  const [patientsCount, sessionsCount, analysesCount, patients] = await Promise.all([
     mk('therapai_patients'),
     mk('therapai_sessions'),
     mk('therapai_analyses'),
+    supabase
+      .from('therapai_patients')
+      .select(`id, name, therapai_sessions(id, session_date, status), therapai_longitudinal(sessions_count, period_start, period_end)`)
+      .order('name'),
   ])
-  return { patients: patients.count ?? 0, sessions: sessions.count ?? 0, analyses: analyses.count ?? 0 }
-}
 
-async function getPatients(supabase: SupabaseClient, scopeToDemo: boolean) {
-  let q = supabase
-    .from('therapai_patients')
-    .select(`id, name, therapai_sessions(id, session_date, status), therapai_longitudinal(sessions_count, period_start, period_end)`)
-    .order('name')
-  if (scopeToDemo) q = q.eq('therapist_id', SYNTHETIC_THERAPIST_ID)
-  const { data } = await q
-  return data ?? []
-}
-
-export default async function HomePage() {
-  const authClient = await createSupabaseServer()
-  const { data: { user } } = await authClient.auth.getUser()
-  const owner = isOwner(user)
-  const supabase: SupabaseClient = owner ? authClient : supabaseAdmin
-  const [stats, patients] = await Promise.all([getStats(supabase, !owner), getPatients(supabase, !owner)])
+  const stats = {
+    patients: patientsCount.count ?? 0,
+    sessions: sessionsCount.count ?? 0,
+    analyses: analysesCount.count ?? 0,
+  }
+  const patientList = patients.data ?? []
 
   if (user) {
-    audit(authClient, user.id, {
+    audit(supabase, user.id, {
       action: 'viewed_dashboard',
-      context: { tenant: owner ? 'real' : 'synthetic', patient_count: stats.patients, session_count: stats.sessions },
+      context: { patient_count: stats.patients, session_count: stats.sessions },
     })
   }
 
-  const withLongitudinal = patients.filter((p: any) => p.therapai_longitudinal?.length > 0)
-  const pending = patients.filter((p: any) => !p.therapai_longitudinal?.length)
+  const withLongitudinal = patientList.filter((p: any) => p.therapai_longitudinal?.length > 0)
+  const pending = patientList.filter((p: any) => !p.therapai_longitudinal?.length)
 
   return (
     <div>
@@ -66,6 +56,21 @@ export default async function HomePage() {
           </div>
         ))}
       </div>
+
+      {stats.patients === 0 && (
+        <div className="bg-indigo-50 border border-indigo-100 rounded-xl p-6 mb-8">
+          <h2 className="font-semibold text-slate-900 mb-1">Nenhum paciente ainda.</h2>
+          <p className="text-sm text-slate-600 mb-3">
+            Quando você gravar a primeira sessão via Fireflies ou Recall.ai
+            (vinculado ao seu email <strong>{user?.email}</strong>), ela entra
+            automaticamente aqui. Você pode também testar a interface no
+            ambiente de demonstração:
+          </p>
+          <Link href="/demo" className="inline-block text-sm text-indigo-700 hover:text-indigo-800 font-medium underline">
+            Ver demo com dados sintéticos →
+          </Link>
+        </div>
+      )}
 
       {withLongitudinal.length > 0 && (
         <section className="mb-8">

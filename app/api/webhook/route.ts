@@ -38,12 +38,13 @@ const OPENAI_API_KEY = process.env.OPENAI_API_KEY!;
 const ANTHROPIC_MODEL = 'claude-opus-4-5';
 const OPENAI_MODEL = 'gpt-4o';
 
-// V1 — single therapist hardcoded. Multi-tenant onboarding will derive this from auth.
-// Post-RLS migration (D20): this UUID = auth.users.id for andrefiker@gmail.com.
-// Service role bypasses RLS so the webhook still inserts/updates freely;
-// the constant only needs to match the current owning therapist's auth uid.
-// Old sentinel value (pre-D20): 'a0000000-0000-0000-0000-000000000001'.
-const ANDRE_THERAPIST_ID = '60fdab49-c4dd-45cc-9e2b-51bec3504d35';
+// Multi-tenant pivot 2026-05-13: webhook resolves the owning therapist by
+// matching the Fireflies host_email against therapai_therapists.email. Falls
+// back to FALLBACK_THERAPIST_ID (env-controlled; defaults to André's uid) when
+// no participant email matches a known tenant. Service-role client bypasses
+// RLS for write side; the resolved id only needs to match an existing row.
+const FALLBACK_THERAPIST_ID =
+  process.env.THERAPAI_FALLBACK_THERAPIST_ID ?? '60fdab49-c4dd-45cc-9e2b-51bec3504d35';
 
 // Patterns to skip when matching speaker names — these are André's voice across speaker labels.
 const ANDRE_NAME_PATTERNS = ['andre', 'andré', 'fiker', 'ghost'];
@@ -68,6 +69,8 @@ interface FirefliesTranscript {
   date: number | string;
   duration: number;
   participants: string[];
+  host_email: string | null;
+  organizer_email: string | null;
   summary: { overview: string | null } | null;
   sentences: FirefliesSentence[];
 }
@@ -276,21 +279,25 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     return NextResponse.json({ ok: true, status: 'failed', reason: 'fireflies_fetch', save: mark });
   }
 
+  // 4b. Multi-tenant resolve: which therapai_therapists row owns this meeting?
+  const therapistId = await resolveTherapistId(supabase, transcript);
+
   // 5. Build / update session row in 'processing' state.
   const sessionDate = normalizeSessionDate(transcript.date);
   const sessionId = await upsertProcessingSession(
     supabase,
+    therapistId,
     existing?.id,
     firefliesId,
     sessionDate,
     sentencesToTranscriptText(transcript.sentences),
   );
 
-  // 6. Identify patient.
+  // 6. Identify patient (scoped to this therapist's roster).
   const patientName = identifyPatient(transcript);
   let patientId: string | null = null;
   if (patientName) {
-    patientId = await matchOrNullPatient(supabase, patientName);
+    patientId = await matchOrNullPatient(supabase, therapistId, patientName);
   }
 
   if (!patientId) {
@@ -347,7 +354,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     {
       session_id: sessionId,
       patient_id: patientId,
-      therapist_id: ANDRE_THERAPIST_ID,
+      therapist_id: therapistId,
       analysis_md: analysisMd,
       session_number: sessionNumber,
     },
@@ -377,7 +384,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   // 8b. D11 molecular analysis — best-effort second pass. Failure here is non-fatal;
   //     session is already 'done' via molar. Future re-runs (rescue script) can backfill.
   try {
-    await runAndSaveMolecular(supabase, sessionId, patientId, transcript, transcriptText);
+    await runAndSaveMolecular(supabase, therapistId, sessionId, patientId, transcript, transcriptText);
   } catch (err) {
     console.error('[webhook] molecular analysis failed (non-fatal)', err);
   }
@@ -386,14 +393,14 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   //     appendix in molar analysis_md. Best-effort. All assertions inserted with
   //     requires_confirmation=true; clinician confirms/dismisses via dashboard.
   try {
-    await extractAndSaveAssertions(supabase, sessionId, patientId, analysisMd);
+    await extractAndSaveAssertions(supabase, therapistId, sessionId, patientId, analysisMd);
   } catch (err) {
     console.error('[webhook] assertion extraction failed (non-fatal)', err);
   }
 
   // 9. Rebuild longitudinal for this patient (D9/D12 — every new session).
   try {
-    await rebuildLongitudinalForPatient(supabase, patientId);
+    await rebuildLongitudinalForPatient(supabase, therapistId, patientId);
   } catch (err) {
     // Longitudinal failure is non-fatal — session analysis is already saved.
     console.error('[webhook] longitudinal rebuild failed (non-fatal)', err);
@@ -410,10 +417,43 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
 }
 
 // ─── Fireflies GraphQL ────────────────────────────────────────────────────────
+// Multi-tenant resolution: pick the owning therapist by matching host/organizer
+// or participant emails (in that priority order) against therapai_therapists.email.
+// Falls back to FALLBACK_THERAPIST_ID when nothing matches — preserves André's
+// existing single-tenant flow without breakage.
+async function resolveTherapistId(
+  supabase: SupabaseClient,
+  transcript: FirefliesTranscript,
+): Promise<string> {
+  const candidates = [
+    transcript.host_email,
+    transcript.organizer_email,
+    ...(transcript.participants ?? []),
+  ]
+    .map(e => (e ?? '').toLowerCase().trim())
+    .filter(e => e.length > 0 && e.includes('@'));
+  if (candidates.length === 0) return FALLBACK_THERAPIST_ID;
+
+  const { data } = await supabase
+    .from('therapai_therapists')
+    .select('id, email')
+    .in('email', candidates)
+    .limit(candidates.length);
+  if (!data || data.length === 0) return FALLBACK_THERAPIST_ID;
+
+  // Prefer the host/organizer match over generic participant match.
+  const byEmail = new Map<string, string>(data.map(r => [r.email.toLowerCase(), r.id]));
+  for (const email of candidates) {
+    const hit = byEmail.get(email);
+    if (hit) return hit;
+  }
+  return FALLBACK_THERAPIST_ID;
+}
+
 async function fetchFirefliesTranscript(id: string): Promise<FirefliesTranscript> {
   const query = `query Transcript($id: String!) {
     transcript(id: $id) {
-      id title date duration participants
+      id title date duration participants host_email organizer_email
       summary { overview }
       sentences { speaker_name text start_time }
     }
@@ -470,11 +510,11 @@ function containsAndrePattern(s: string): boolean {
   return ANDRE_NAME_PATTERNS.some((p) => lower.includes(p));
 }
 
-async function matchOrNullPatient(supabase: SupabaseClient, candidateName: string): Promise<string | null> {
+async function matchOrNullPatient(supabase: SupabaseClient, therapistId: string, candidateName: string): Promise<string | null> {
   const { data: patients } = await supabase
     .from('therapai_patients')
     .select('id, name')
-    .eq('therapist_id', ANDRE_THERAPIST_ID);
+    .eq('therapist_id', therapistId);
   if (!patients || patients.length === 0) return null;
 
   const candidate = candidateName.trim().toLowerCase();
@@ -510,6 +550,7 @@ function similarity(a: string, b: string): number {
 // ─── Sessions table helpers ───────────────────────────────────────────────────
 async function upsertProcessingSession(
   supabase: SupabaseClient,
+  therapistId: string,
   existingId: string | undefined,
   firefliesId: string,
   sessionDate: string,
@@ -529,7 +570,7 @@ async function upsertProcessingSession(
   const { data, error } = await supabase
     .from('therapai_sessions')
     .insert({
-      therapist_id: ANDRE_THERAPIST_ID,
+      therapist_id: therapistId,
       session_date: sessionDate,
       transcript_text: transcriptText,
       status: 'processing',
@@ -602,12 +643,13 @@ async function markSessionWithStatus(
     return { ok: true, verified, sessionId };
   }
   // Upsert path — no existing sessionId. We need to capture the row's id after upsert
-  // so verification can confirm it stuck.
+  // so verification can confirm it stuck. Therapist fallback used here since we don't
+  // yet have transcript context to resolve a specific tenant.
   const { data, error } = await supabase
     .from('therapai_sessions')
     .upsert(
       {
-        therapist_id: ANDRE_THERAPIST_ID,
+        therapist_id: FALLBACK_THERAPIST_ID,
         session_date: new Date().toISOString().slice(0, 10),
         status,
         fireflies_id: firefliesId,
@@ -1020,6 +1062,7 @@ function deriveMolecularAssertions(molecular: unknown): AssertionInsert[] {
 
 async function extractAndSaveMolecularAssertions(
   supabase: SupabaseClient,
+  therapistId: string,
   sessionId: string,
   patientId: string,
   molecularMd: string,
@@ -1036,7 +1079,7 @@ async function extractAndSaveMolecularAssertions(
   }
   const rows = assertions.map((a) => ({
     patient_id: patientId,
-    therapist_id: ANDRE_THERAPIST_ID,
+    therapist_id: therapistId,
     source_session_id: sessionId,
     dimension: a.dimension,
     sub_key: a.sub_key,
@@ -1056,6 +1099,7 @@ async function extractAndSaveMolecularAssertions(
 
 async function extractAndSaveAssertions(
   supabase: SupabaseClient,
+  therapistId: string,
   sessionId: string,
   patientId: string,
   analysisMd: string,
@@ -1072,7 +1116,7 @@ async function extractAndSaveAssertions(
   }
   const rows = assertions.map((a) => ({
     patient_id: patientId,
-    therapist_id: ANDRE_THERAPIST_ID,
+    therapist_id: therapistId,
     source_session_id: sessionId,
     dimension: a.dimension,
     sub_key: a.sub_key,
@@ -1122,6 +1166,7 @@ function countMolecularEvents(md: string): number {
 
 async function runAndSaveMolecular(
   supabase: SupabaseClient,
+  therapistId: string,
   sessionId: string,
   patientId: string,
   transcript: FirefliesTranscript,
@@ -1136,7 +1181,7 @@ async function runAndSaveMolecular(
   const { error } = await supabase.from('therapai_molecular_analyses').upsert({
     session_id: sessionId,
     patient_id: patientId,
-    therapist_id: ANDRE_THERAPIST_ID,
+    therapist_id: therapistId,
     molecular_md: result.text,
     events_count: eventsCount,
     model_used: result.model,
@@ -1149,14 +1194,14 @@ async function runAndSaveMolecular(
   // F2+F5 V2 — extract alliance_event + relational_frame from molecular JSON appendix.
   // Best-effort; molecular save above is the durable artifact.
   try {
-    await extractAndSaveMolecularAssertions(supabase, sessionId, patientId, result.text);
+    await extractAndSaveMolecularAssertions(supabase, therapistId, sessionId, patientId, result.text);
   } catch (err) {
     console.error('[webhook] molecular assertion extraction failed (non-fatal)', err);
   }
 }
 
 // ─── Longitudinal rebuild ─────────────────────────────────────────────────────
-async function rebuildLongitudinalForPatient(supabase: SupabaseClient, patientId: string): Promise<void> {
+async function rebuildLongitudinalForPatient(supabase: SupabaseClient, therapistId: string, patientId: string): Promise<void> {
   const { data: patient } = await supabase
     .from('therapai_patients')
     .select('name')
@@ -1214,7 +1259,7 @@ async function rebuildLongitudinalForPatient(supabase: SupabaseClient, patientId
   } else {
     await supabase.from('therapai_longitudinal').insert({
       patient_id: patientId,
-      therapist_id: ANDRE_THERAPIST_ID,
+      therapist_id: therapistId,
       report_md: result.text,
       sessions_count: analyses.length,
       period_start: periodStart,

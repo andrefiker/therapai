@@ -9,8 +9,7 @@
 // queries return empty rows → response shows nothing → 404 returned to client.
 
 import { NextRequest, NextResponse } from 'next/server';
-import { createSupabaseServer, supabaseAdmin } from '@/lib/supabase';
-import { isOwner, SYNTHETIC_THERAPIST_ID } from '@/lib/viewer';
+import { createSupabaseServer } from '@/lib/supabase';
 import { audit, extractClientIp } from '@/lib/audit';
 
 export const runtime = 'nodejs';
@@ -21,18 +20,16 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
   const { id: patientId } = await params;
   if (!patientId) return NextResponse.json({ error: 'missing_patient_id' }, { status: 400 });
 
-  const authClient = await createSupabaseServer();
-  const { data: { user } } = await authClient.auth.getUser();
+  const supabase = await createSupabaseServer();
+  const { data: { user } } = await supabase.auth.getUser();
   if (!user) return NextResponse.json({ error: 'unauthorized' }, { status: 401 });
 
-  // Demo mode: evaluators read the synthetic tenant (Dra. Demo) via admin client.
-  // LGPD pivot 2026-05-12 (ISA therapai-lgpd-compliance F2) — no real-patient leak.
-  const owner = isOwner(user);
-  const supabase = owner ? authClient : supabaseAdmin;
-
-  let pq = supabase.from('therapai_patients').select('id, name').eq('id', patientId);
-  if (!owner) pq = pq.eq('therapist_id', SYNTHETIC_THERAPIST_ID);
-  const { data: patient } = await pq.maybeSingle();
+  // RLS scopes to therapist_id = auth.uid().
+  const { data: patient } = await supabase
+    .from('therapai_patients')
+    .select('id, name')
+    .eq('id', patientId)
+    .maybeSingle();
   if (!patient) return NextResponse.json({ error: 'not_found' }, { status: 404 });
 
   // Confirmed state via the SQL function.
@@ -76,12 +73,11 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
   }
 
   // LGPD audit trail (ISA F5.3)
-  audit(authClient, user.id, {
+  audit(supabase, user.id, {
     action: 'viewed_memory',
     target_table: 'therapai_patients',
     target_row_id: patient.id,
     context: {
-      tenant: owner ? 'real' : 'synthetic',
       confirmed_count: (confirmedRows ?? []).length,
       pending_count: (pendingRows ?? []).length,
     },

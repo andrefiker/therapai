@@ -1,21 +1,35 @@
 import { createServerClient } from '@supabase/ssr'
 import { NextResponse, type NextRequest } from 'next/server'
+import { supabaseAdmin } from '@/lib/supabase'
+import { isInvited } from '@/lib/viewer'
 
-// Demo-mode signup (2026-05-11): magic-link auth is open to anyone.
-// Only André's email gets owner-therapist privileges (write access).
-// Every other authenticated user lands in read-only evaluator view of the
-// synthetic Dra. Demo tenant (see lib/viewer.ts).
-//
-// LGPD F8.1 (2026-05-13): error handling added around the Supabase auth
-// exchanges. Failures previously redirected silently to /dashboard with no
-// session, which middleware then bounced to /login — producing Mate's reported
-// "click link, get sent back to email entry" loop. Now failures redirect
-// explicitly to /login?error=<reason> so the user sees what happened and can
-// request another link without confusion.
+// Multi-tenant pivot 2026-05-13: after a successful auth exchange, route the
+// user based on tenant state:
+//   - therapai_therapists row exists  → /dashboard
+//   - invited on waitlist             → /onboarding
+//   - neither                         → /pending
+// LGPD F8.1: explicit /login?error=... on auth failure so users see what
+// happened instead of looping back to the email field silently.
+
 function loginUrl(origin: string, error: string): URL {
   const url = new URL(`${origin}/login`)
   url.searchParams.set('error', error)
   return url
+}
+
+async function resolveLandingPath(userId: string, email: string | null): Promise<string> {
+  // Has a tenant row?
+  const { data: therapist } = await supabaseAdmin
+    .from('therapai_therapists')
+    .select('id')
+    .eq('id', userId)
+    .maybeSingle()
+  if (therapist) return '/dashboard'
+
+  // Invited?
+  if (email && await isInvited(supabaseAdmin, email)) return '/onboarding'
+
+  return '/pending'
 }
 
 export async function GET(request: NextRequest) {
@@ -23,9 +37,9 @@ export async function GET(request: NextRequest) {
   const code = searchParams.get('code')
   const token_hash = searchParams.get('token_hash')
   const type = searchParams.get('type')
-  const next = searchParams.get('next') ?? '/dashboard'
+  const nextOverride = searchParams.get('next')
 
-  const response = NextResponse.redirect(`${origin}${next}`)
+  let response = NextResponse.redirect(`${origin}/dashboard`)
 
   const supabase = createServerClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -45,29 +59,29 @@ export async function GET(request: NextRequest) {
   if (code) {
     const { error } = await supabase.auth.exchangeCodeForSession(code)
     if (error) {
-      console.error('[auth/callback] exchangeCodeForSession failed', {
-        message: error.message,
-        status: error.status,
-      })
+      console.error('[auth/callback] exchangeCodeForSession failed', { message: error.message, status: error.status })
       return NextResponse.redirect(loginUrl(origin, 'link_invalid_or_expired'))
     }
-    return response
-  }
-
-  if (token_hash && type) {
+  } else if (token_hash && type) {
     const { error } = await supabase.auth.verifyOtp({
       token_hash,
       type: type as 'email' | 'magiclink' | 'recovery' | 'invite' | 'signup',
     })
     if (error) {
-      console.error('[auth/callback] verifyOtp failed', {
-        message: error.message,
-        status: error.status,
-      })
+      console.error('[auth/callback] verifyOtp failed', { message: error.message, status: error.status })
       return NextResponse.redirect(loginUrl(origin, 'otp_invalid_or_expired'))
     }
-    return response
+  } else {
+    return NextResponse.redirect(loginUrl(origin, 'missing_auth_params'))
   }
 
-  return NextResponse.redirect(loginUrl(origin, 'missing_auth_params'))
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return NextResponse.redirect(loginUrl(origin, 'session_not_persisted'))
+
+  const target = nextOverride ?? await resolveLandingPath(user.id, user.email ?? null)
+
+  // Re-anchor the response onto the resolved target while preserving the set-cookie writes.
+  const redirected = NextResponse.redirect(`${origin}${target}`)
+  for (const c of response.cookies.getAll()) redirected.cookies.set(c)
+  return redirected
 }
