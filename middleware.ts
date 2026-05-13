@@ -25,6 +25,11 @@ export async function middleware(request: NextRequest) {
 
   const pathname = request.nextUrl.pathname
 
+  // 2026-05-13: all /api/* routes pass through middleware. Each route handler
+  // performs its own auth check (typically returning 401 JSON for unauthenticated
+  // callers), which is the correct contract for an API surface — middleware
+  // redirecting /api/me/export to /login broke API ergonomics. Page routes
+  // (/dashboard, /patients, /settings, /admin) still require auth via middleware.
   const isPublic =
     pathname === '/' ||
     pathname === '/pending' ||
@@ -32,10 +37,7 @@ export async function middleware(request: NextRequest) {
     pathname === '/termos' ||
     pathname === '/dpa' ||
     pathname.startsWith('/login') ||
-    pathname.startsWith('/api/auth') ||
-    pathname.startsWith('/api/webhook') ||
-    pathname.startsWith('/api/waitlist') ||
-    pathname.startsWith('/api/stripe/webhook') ||
+    pathname.startsWith('/api/') ||
     pathname.startsWith('/_next') ||
     pathname.startsWith('/favicon')
 
