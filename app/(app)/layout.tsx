@@ -29,6 +29,9 @@ export default async function AppLayout({ children }: { children: React.ReactNod
               {isAdmin && (
                 <a href="/admin/waitlist" className="text-sm text-indigo-600 hover:text-indigo-700 font-medium">Lista de espera</a>
               )}
+              {!evaluatorMode && (
+                <a href="/biblioteca-clinica" className="text-sm text-slate-500 hover:text-slate-900">Biblioteca clínica</a>
+              )}
               <a href="/settings" className="text-sm text-slate-500 hover:text-slate-900">Configurações</a>
               <span className="text-sm text-slate-500">{user.email}</span>
               <LogoutButton />
