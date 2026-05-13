@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { createClient } from '@supabase/supabase-js'
 
 const supabase = createClient(
@@ -8,16 +8,39 @@ const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
 )
 
+// LGPD F8.1 (2026-05-13): callback may redirect here with ?error=<reason>
+// when an auth exchange fails (expired link, replay, cross-browser handoff).
+// Surface that reason to the user instead of silently re-prompting for email.
+const CALLBACK_ERROR_MESSAGES: Record<string, string> = {
+  link_invalid_or_expired:
+    'O link mágico expirou ou já foi usado. Solicite um novo abaixo.',
+  otp_invalid_or_expired:
+    'O código OTP expirou ou é inválido. Solicite um novo link.',
+  missing_auth_params:
+    'O link de acesso parece incompleto. Solicite outro abaixo.',
+}
+
 export default function LoginPage() {
   const [email, setEmail] = useState('')
   const [sent, setSent] = useState(false)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
+  const [callbackError, setCallbackError] = useState('')
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    const params = new URLSearchParams(window.location.search)
+    const errKey = params.get('error')
+    if (errKey) {
+      setCallbackError(CALLBACK_ERROR_MESSAGES[errKey] ?? 'Não foi possível concluir o login. Solicite um novo link.')
+    }
+  }, [])
 
   async function handleLogin(e: React.FormEvent) {
     e.preventDefault()
     setLoading(true)
     setError('')
+    setCallbackError('')
     const { error } = await supabase.auth.signInWithOtp({
       email,
       options: { emailRedirectTo: `${window.location.origin}/api/auth/callback` }
@@ -55,6 +78,11 @@ export default function LoginPage() {
             <p className="text-sm text-slate-400 mb-6">
               Receba um link mágico no seu email
             </p>
+            {callbackError && (
+              <div className="mb-4 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+                {callbackError}
+              </div>
+            )}
             <form onSubmit={handleLogin} className="space-y-4">
               <input
                 type="email"

@@ -3,11 +3,21 @@ import { NextResponse, type NextRequest } from 'next/server'
 
 // Demo-mode signup (2026-05-11): magic-link auth is open to anyone.
 // Only André's email gets owner-therapist privileges (write access).
-// Every other authenticated user lands in read-only evaluator view of
-// André's tenant (see lib/viewer.ts + the dashboard query split).
+// Every other authenticated user lands in read-only evaluator view of the
+// synthetic Dra. Demo tenant (see lib/viewer.ts).
 //
-// When real paying clinicians come online via /admin/waitlist, this will be
-// revisited — at that point each clinician needs their own tenant restored.
+// LGPD F8.1 (2026-05-13): error handling added around the Supabase auth
+// exchanges. Failures previously redirected silently to /dashboard with no
+// session, which middleware then bounced to /login — producing Mate's reported
+// "click link, get sent back to email entry" loop. Now failures redirect
+// explicitly to /login?error=<reason> so the user sees what happened and can
+// request another link without confusion.
+function loginUrl(origin: string, error: string): URL {
+  const url = new URL(`${origin}/login`)
+  url.searchParams.set('error', error)
+  return url
+}
+
 export async function GET(request: NextRequest) {
   const { searchParams, origin } = new URL(request.url)
   const code = searchParams.get('code')
@@ -33,14 +43,31 @@ export async function GET(request: NextRequest) {
   )
 
   if (code) {
-    await supabase.auth.exchangeCodeForSession(code)
+    const { error } = await supabase.auth.exchangeCodeForSession(code)
+    if (error) {
+      console.error('[auth/callback] exchangeCodeForSession failed', {
+        message: error.message,
+        status: error.status,
+      })
+      return NextResponse.redirect(loginUrl(origin, 'link_invalid_or_expired'))
+    }
     return response
   }
 
   if (token_hash && type) {
-    await supabase.auth.verifyOtp({ token_hash, type: type as 'email' | 'magiclink' | 'recovery' | 'invite' | 'signup' })
+    const { error } = await supabase.auth.verifyOtp({
+      token_hash,
+      type: type as 'email' | 'magiclink' | 'recovery' | 'invite' | 'signup',
+    })
+    if (error) {
+      console.error('[auth/callback] verifyOtp failed', {
+        message: error.message,
+        status: error.status,
+      })
+      return NextResponse.redirect(loginUrl(origin, 'otp_invalid_or_expired'))
+    }
     return response
   }
 
-  return NextResponse.redirect(`${origin}/login`)
+  return NextResponse.redirect(loginUrl(origin, 'missing_auth_params'))
 }
