@@ -27,8 +27,8 @@ export default function LandingPage() {
               <a href="#lista" className="bg-indigo-600 hover:bg-indigo-700 text-white font-medium px-5 py-3 rounded-lg transition-colors">
                 Entrar na lista de espera
               </a>
-              <a href="#exemplo" className="text-slate-700 hover:text-slate-900 font-medium px-5 py-3 rounded-lg border border-slate-200 hover:border-slate-300 transition-colors">
-                Ver análise real
+              <a href="/demo" className="text-slate-700 hover:text-slate-900 font-medium px-5 py-3 rounded-lg border border-slate-200 hover:border-slate-300 transition-colors">
+                Abrir demo
               </a>
             </div>
             <p className="mt-6 text-sm text-slate-500">
