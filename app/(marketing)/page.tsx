@@ -32,8 +32,9 @@ export default function LandingPage() {
               </a>
             </div>
             <p className="mt-6 text-sm text-slate-500">
-              Construído por um psicólogo clínico em atuação há 12 anos. Análise do
-              Comportamento + RFT. Não substitui o clínico — escala a memória dele.
+              Construído por um psicólogo clínico em atuação há 12 anos. Comportamental,
+              CBT, psicodinâmica, sistêmica, ACT, DBT, humanista — você escolhe a lente
+              teórica, a IA aplica. Não substitui o clínico — escala a memória dele.
             </p>
           </div>
         </div>
@@ -147,6 +148,81 @@ export default function LandingPage() {
         </div>
       </section>
 
+      {/* ─────── CLINICAL LINES ─────── */}
+      <section id="linhas" className="bg-slate-50 border-y border-slate-100 px-6 py-20">
+        <div className="max-w-6xl mx-auto">
+          <div className="max-w-3xl mb-10">
+            <div className="text-xs font-semibold tracking-wide uppercase text-slate-500 mb-3">
+              Sua linha teórica, sua análise
+            </div>
+            <h2 className="text-3xl sm:text-4xl font-bold text-slate-900 leading-tight mb-4">
+              Nove tradições clínicas curadas. Você escolhe a lente.
+            </h2>
+            <p className="text-slate-600 leading-relaxed">
+              A IA não impõe uma escola. Cada análise é produzida sob a tradição que
+              você escolhe no onboarding — com o vocabulário, os construtos e as
+              intervenções <em>daquela</em> linha. Biblioteca curada conceito-a-conceito,
+              cada item rotulado com fonte. RAG sobre teoria clínica — sem treinar
+              modelo em livros, sem reproduzir texto autoral, sem alucinação teórica.
+            </p>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+            <LineCard
+              name="Análise do Comportamento"
+              short="Radical behaviorism"
+              body="Skinner. Análise funcional, contingências de reforçamento, comportamento verbal, controle de estímulos."
+            />
+            <LineCard
+              name="ACT"
+              short="Aceitação & Compromisso"
+              body="Hayes. Flexibilidade psicológica, defusão cognitiva, valores, ação comprometida, hexaflex."
+            />
+            <LineCard
+              name="RFT"
+              short="Teoria dos Quadros Relacionais"
+              body="Base experimental da linguagem e cognição. Frames relacionais arbitrariamente aplicáveis, transformação de funções."
+            />
+            <LineCard
+              name="TCC"
+              short="Terapia Cognitivo-Comportamental"
+              body="Beck. Tríade cognitiva, distorções, esquemas, reestruturação, experimentos comportamentais, ativação."
+            />
+            <LineCard
+              name="DBT"
+              short="Comportamental Dialética"
+              body="Linehan. Mindfulness, tolerância ao mal-estar, regulação emocional, efetividade interpessoal, validação."
+            />
+            <LineCard
+              name="Psicodinâmica"
+              short="Pós-Freudiana ampla"
+              body="Klein, Winnicott, Kohut. Relações objetais, transferência, contratransferência, defesas, identificação projetiva."
+            />
+            <LineCard
+              name="Psicanálise freudiana"
+              short="Clássica"
+              body="Freud. Inconsciente, modelo estrutural (id/ego/superego), Édipo, interpretação de sonhos, elaboração."
+            />
+            <LineCard
+              name="Sistêmica / familiar"
+              short="Bowen · Minuchin · narrativa"
+              body="Causalidade circular, triangulação, fronteiras estruturais, externalização narrativa, genograma."
+            />
+            <LineCard
+              name="Humanista"
+              short="Rogers · Gestalt · existencial"
+              body="Consideração positiva incondicional, empatia, congruência, contato Gestalt, dados existenciais de Yalom, logoterapia."
+            />
+          </div>
+
+          <p className="text-xs text-slate-500 mt-8 max-w-3xl">
+            Cada conceito da biblioteca passa por revisão clínica antes de entrar em
+            análises automatizadas. As referências de cada linha são bibliografia
+            primária da tradição — citadas, não substituídas pela IA.
+          </p>
+        </div>
+      </section>
+
       {/* ─────── PRICING ─────── */}
       <section id="preco" className="bg-slate-50 border-y border-slate-100 px-6 py-20">
         <div className="max-w-3xl mx-auto text-center">
@@ -220,6 +296,16 @@ function Differentiator({ title, body }: { title: string; body: string }) {
   return (
     <div className="border-l-2 border-indigo-200 pl-5">
       <h3 className="font-semibold text-slate-900 mb-1.5">{title}</h3>
+      <p className="text-sm text-slate-600 leading-relaxed">{body}</p>
+    </div>
+  )
+}
+
+function LineCard({ name, short, body }: { name: string; short: string; body: string }) {
+  return (
+    <div className="bg-white border border-slate-200 rounded-xl p-5 hover:border-indigo-200 hover:shadow-sm transition-all">
+      <h3 className="font-semibold text-slate-900">{name}</h3>
+      <div className="text-xs text-indigo-600 font-medium mt-0.5 mb-3">{short}</div>
       <p className="text-sm text-slate-600 leading-relaxed">{body}</p>
     </div>
   )
