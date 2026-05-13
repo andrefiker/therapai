@@ -12,6 +12,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createSupabaseServer, supabaseAdmin } from '@/lib/supabase';
 import { isOwner, SYNTHETIC_THERAPIST_ID } from '@/lib/viewer';
+import { audit, extractClientIp } from '@/lib/audit';
 import Anthropic from '@anthropic-ai/sdk';
 import OpenAI from 'openai';
 
@@ -304,6 +305,16 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   if (insertErr) {
     console.error('[chat] persist failed (non-fatal)', insertErr);
   }
+
+  // LGPD audit trail (ISA F5.3) — records the access, not the question text.
+  audit(supabase, user.id, {
+    action: 'chat_query',
+    target_table: 'therapai_patients',
+    target_row_id: patient.id,
+    context: { tenant: 'real', model: result.model, question_length: question.length },
+    ip: extractClientIp(req.headers),
+    user_agent: req.headers.get('user-agent'),
+  });
 
   return NextResponse.json({
     ok: true,

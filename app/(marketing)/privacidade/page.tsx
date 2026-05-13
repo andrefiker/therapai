@@ -163,7 +163,8 @@ export default function PrivacidadePage() {
           <li>Autenticação por link mágico via email — sem senhas armazenadas.</li>
           <li>Isolamento por inquilino com Row Level Security no banco — cada psicólogo só acessa os próprios pacientes; isolamento verificado por linter de segurança do Supabase.</li>
           <li>Chaves de API e segredos em variáveis de ambiente da plataforma de hospedagem (Vercel), não em código nem em colunas de banco.</li>
-          <li>Logs operacionais via Supabase e Vercel. Auditoria estruturada por linha de aplicação está sendo implementada — quando ativa, registra cada acesso a dados clínicos por psicólogo, com retenção mínima de 12 meses.</li>
+          <li>Auditoria estruturada por linha de aplicação ativa: cada acesso de psicólogo a paciente, sessão, análise ou memória clínica registra uma linha em <code>therapai_audit_log</code> com identificador do clínico, ação, alvo, IP pseudonimizado (SHA-256 com sal rotacionável) e timestamp. Retenção mínima de 12 meses. Disponível ao titular mediante solicitação (LGPD art. 18).</li>
+          <li>Logs operacionais adicionais via Supabase e Vercel para diagnóstico de falhas e segurança da plataforma.</li>
         </ul>
         <p>
           Em caso de incidente de segurança que envolva risco ou dano relevante,

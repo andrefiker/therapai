@@ -1,6 +1,7 @@
 import { createSupabaseServer, supabaseAdmin } from '@/lib/supabase'
 import { SupabaseClient } from '@supabase/supabase-js'
 import { isOwner, SYNTHETIC_THERAPIST_ID } from '@/lib/viewer'
+import { audit } from '@/lib/audit'
 import Link from 'next/link'
 
 export const revalidate = 0
@@ -40,6 +41,13 @@ export default async function HomePage() {
   const owner = isOwner(user)
   const supabase: SupabaseClient = owner ? authClient : supabaseAdmin
   const [stats, patients] = await Promise.all([getStats(supabase, !owner), getPatients(supabase, !owner)])
+
+  if (user) {
+    audit(authClient, user.id, {
+      action: 'viewed_dashboard',
+      context: { tenant: owner ? 'real' : 'synthetic', patient_count: stats.patients, session_count: stats.sessions },
+    })
+  }
 
   const withLongitudinal = patients.filter((p: any) => p.therapai_longitudinal?.length > 0)
   const pending = patients.filter((p: any) => !p.therapai_longitudinal?.length)

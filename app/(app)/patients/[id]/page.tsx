@@ -1,5 +1,6 @@
 import { createSupabaseServer, supabaseAdmin } from '@/lib/supabase'
 import { isOwner, SYNTHETIC_THERAPIST_ID } from '@/lib/viewer'
+import { audit } from '@/lib/audit'
 import { BriefingButton } from '@/components/BriefingButton'
 import { AssertionsPanel } from '@/components/AssertionsPanel'
 import { CaseChat } from '@/components/CaseChat'
@@ -68,6 +69,19 @@ export default async function PatientPage({ params }: { params: Promise<{ id: st
         <Link href="/" className="text-indigo-600 text-sm mt-4 inline-block">← Voltar</Link>
       </div>
     )
+  }
+
+  if (user) {
+    audit(authClient, user.id, {
+      action: 'viewed_patient',
+      target_table: 'therapai_patients',
+      target_row_id: patient.id,
+      context: {
+        tenant: owner ? 'real' : 'synthetic',
+        sessions_count: (patient.therapai_sessions ?? []).length,
+        has_longitudinal: (patient.therapai_longitudinal ?? []).length > 0,
+      },
+    })
   }
 
   const sessions = [...(patient.therapai_sessions ?? [])].sort(

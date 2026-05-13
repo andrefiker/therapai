@@ -11,12 +11,13 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createSupabaseServer, supabaseAdmin } from '@/lib/supabase';
 import { isOwner, SYNTHETIC_THERAPIST_ID } from '@/lib/viewer';
+import { audit, extractClientIp } from '@/lib/audit';
 
 export const runtime = 'nodejs';
 export const revalidate = 0;
 export const dynamic = 'force-dynamic';
 
-export async function GET(_req: NextRequest, { params }: { params: Promise<{ id: string }> }): Promise<NextResponse> {
+export async function GET(req: NextRequest, { params }: { params: Promise<{ id: string }> }): Promise<NextResponse> {
   const { id: patientId } = await params;
   if (!patientId) return NextResponse.json({ error: 'missing_patient_id' }, { status: 400 });
 
@@ -73,6 +74,20 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
       sessionsIndex[s.id] = { session_number: num, session_date: (s as { session_date?: string | null }).session_date ?? null };
     }
   }
+
+  // LGPD audit trail (ISA F5.3)
+  audit(authClient, user.id, {
+    action: 'viewed_memory',
+    target_table: 'therapai_patients',
+    target_row_id: patient.id,
+    context: {
+      tenant: owner ? 'real' : 'synthetic',
+      confirmed_count: (confirmedRows ?? []).length,
+      pending_count: (pendingRows ?? []).length,
+    },
+    ip: extractClientIp(req.headers),
+    user_agent: req.headers.get('user-agent'),
+  });
 
   return NextResponse.json({
     ok: true,
