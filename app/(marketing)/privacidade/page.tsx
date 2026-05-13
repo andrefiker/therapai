@@ -150,9 +150,18 @@ export default function PrivacidadePage() {
           úteis.
         </p>
         <p>
+          <strong>Endpoints técnicos disponíveis ao controlador autenticado</strong> (psicólogo-usuário):
+        </p>
+        <ul>
+          <li><code>GET /api/me/export</code> — exportação estruturada (JSON) de todos os seus dados na plataforma: conta, pacientes, sessões, análises, relatórios longitudinais, asserções de memória, consultas de caso e log de auditoria. Atende os direitos de acesso (art. 18, II) e portabilidade (art. 18, V).</li>
+          <li><code>POST /api/patient/[id]/forget</code> — eliminação irreversível de um paciente e todos os dados clínicos derivados (sessões, transcrições, análises, relatórios, asserções). Atende o direito à eliminação (art. 18, VI). Registrado em log de auditoria antes e depois da operação.</li>
+        </ul>
+        <p>
           <strong>Pacientes de psicólogos-usuários</strong> devem encaminhar
           solicitações primeiro ao seu psicólogo (controlador). TherapAI
-          coopera com o controlador no atendimento da solicitação.
+          coopera com o controlador no atendimento da solicitação, inclusive
+          executando a eliminação técnica via os endpoints acima quando o
+          controlador determinar.
         </p>
       </Section>
 
