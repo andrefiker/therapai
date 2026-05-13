@@ -73,9 +73,18 @@ export default function PrivacidadePage() {
         <p>
           <strong>Limitação de acesso:</strong> os dados clínicos de cada
           paciente ficam isolados por inquilino (tenant), com Row Level Security
-          no banco de dados. TherapAI (André Fiker) tem acesso técnico aos dados
-          apenas para fins de operação, manutenção e diagnóstico de falhas, sem
-          acesso clínico no sentido terapêutico.
+          (RLS) habilitada no banco de dados — cada conta de psicólogo só
+          consegue ler e escrever as próprias linhas. Verificado pelo linter
+          de segurança do Supabase. TherapAI (André Fiker) tem acesso técnico
+          aos dados apenas para fins de operação, manutenção e diagnóstico de
+          falhas, sem acesso clínico no sentido terapêutico.
+        </p>
+        <p>
+          Durante o período de demonstração para parceiros avaliadores, qualquer
+          conta que não seja a do operador (André Fiker) é roteada para um
+          inquilino sintético de demonstração, com pacientes, transcrições e
+          análises fictícias claramente marcadas — nenhum dado clínico real é
+          exposto fora do operador.
         </p>
       </Section>
 
@@ -103,7 +112,7 @@ export default function PrivacidadePage() {
           <li><strong>Supabase</strong> (banco de dados PostgreSQL) — região <em>sa-east-1</em> (São Paulo). Armazenamento de transcrições, análises, contas de usuário.</li>
           <li><strong>Vercel</strong> (hospedagem da aplicação) — processamento efêmero de requisições; sem armazenamento persistente.</li>
           <li><strong>Anthropic (Claude)</strong> — geração de análise clínica via API. Dados enviados sem retenção para treinamento (Anthropic API zero-retention policy padrão).</li>
-          <li><strong>OpenAI (GPT)</strong> — fallback de inferência quando Anthropic indisponível. API com retenção zero opt-in.</li>
+          <li><strong>OpenAI (GPT)</strong> — fallback de inferência quando Anthropic indisponível. Dados enviados via API com política contratual de não-uso para treinamento.</li>
           <li><strong>Fireflies.ai</strong> — captura de transcrição de sessão (apenas se o psicólogo opta por integrar). Plataforma de terceiros com termos próprios — consulte o psicólogo.</li>
         </ul>
         <p>
@@ -149,12 +158,12 @@ export default function PrivacidadePage() {
 
       <Section title="8. Segurança">
         <ul>
-          <li>Conexões cifradas com TLS 1.3 em todas as rotas.</li>
-          <li>Banco de dados com criptografia em repouso (Supabase managed).</li>
+          <li>Conexões cifradas com TLS em todas as rotas (HSTS, max-age 2 anos).</li>
+          <li>Banco de dados com criptografia em repouso (Supabase managed, AES-256).</li>
           <li>Autenticação por link mágico via email — sem senhas armazenadas.</li>
-          <li>Isolamento por inquilino com Row Level Security no banco — cada psicólogo só vê os próprios pacientes.</li>
-          <li>Chaves de API e segredos em variáveis de ambiente cifradas.</li>
-          <li>Logs de auditoria de acesso e modificação.</li>
+          <li>Isolamento por inquilino com Row Level Security no banco — cada psicólogo só acessa os próprios pacientes; isolamento verificado por linter de segurança do Supabase.</li>
+          <li>Chaves de API e segredos em variáveis de ambiente da plataforma de hospedagem (Vercel), não em código nem em colunas de banco.</li>
+          <li>Logs operacionais via Supabase e Vercel. Auditoria estruturada por linha de aplicação está sendo implementada — quando ativa, registra cada acesso a dados clínicos por psicólogo, com retenção mínima de 12 meses.</li>
         </ul>
         <p>
           Em caso de incidente de segurança que envolva risco ou dano relevante,

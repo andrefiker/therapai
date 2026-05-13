@@ -13,7 +13,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
     <div className="min-h-screen bg-slate-50">
       {evaluatorMode && (
         <div className="bg-amber-50 border-b border-amber-200 px-6 py-2 text-center text-xs text-amber-900">
-          <strong>Modo demonstração</strong> — você está visualizando dados clínicos de André Fiker em modo somente-leitura. Confirmações, perguntas ao caso e geração de briefings estão desativadas.
+          <strong>Modo demonstração</strong> — você está visualizando dados clínicos <strong>sintéticos</strong> (tenant Dra. Demo) em modo somente-leitura. Nenhum paciente real é exibido. Confirmações, perguntas ao caso e geração de briefings estão desativadas.
         </div>
       )}
       <nav className="bg-white border-b border-slate-200 px-6 py-4">
