@@ -44,6 +44,19 @@ export default async function HomePage() {
 
   return (
     <div>
+      <div className="flex items-end justify-between mb-6">
+        <div>
+          <h1 className="text-2xl font-bold text-slate-900">Seus pacientes</h1>
+          <p className="text-sm text-slate-500">Resumo da sua prática clínica monitorada pela IA.</p>
+        </div>
+        <Link
+          href="/patients/new"
+          className="bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors"
+        >
+          + Novo paciente
+        </Link>
+      </div>
+
       <div className="grid grid-cols-3 gap-4 mb-8">
         {[
           { label: 'Pacientes', value: stats.patients },

@@ -1,6 +1,7 @@
-import { createSupabaseServer } from '@/lib/supabase'
+import { createSupabaseServer, supabaseAdmin } from '@/lib/supabase'
 import { subscriptionStatusLabel } from '@/lib/stripe'
 import { ManageSubscriptionButton } from '@/components/ManageSubscriptionButton'
+import { SettingsForm } from './SettingsForm'
 import Link from 'next/link'
 
 export const dynamic = 'force-dynamic'
@@ -12,9 +13,15 @@ export default async function SettingsPage() {
 
   const { data: t } = await supabase
     .from('therapai_therapists')
-    .select('id, email, name, plan, sessions_limit, stripe_customer_id, stripe_subscription_id, subscription_status, subscription_current_period_end, created_at')
+    .select('id, email, name, plan, sessions_limit, clinical_lens, ingest_source, stripe_customer_id, stripe_subscription_id, subscription_status, subscription_current_period_end, created_at')
     .eq('id', user!.id)
     .maybeSingle()
+
+  const { data: lines } = await supabaseAdmin
+    .from('therapai_clinical_lines')
+    .select('slug, name_pt')
+    .eq('status', 'active')
+    .order('name_pt')
 
   const status = subscriptionStatusLabel(t?.subscription_status ?? null)
   const toneClass: Record<typeof status.tone, string> = {
@@ -27,15 +34,26 @@ export default async function SettingsPage() {
   return (
     <div className="max-w-3xl">
       <h1 className="text-2xl font-bold text-slate-900 mb-2">Configurações</h1>
-      <p className="text-sm text-slate-500 mb-8">Conta, plano e assinatura.</p>
+      <p className="text-sm text-slate-500 mb-8">Conta, preferências clínicas e assinatura.</p>
+
+      <section className="bg-white rounded-xl border border-slate-200 p-6 mb-6">
+        <h2 className="text-base font-semibold text-slate-900 mb-1">Preferências clínicas</h2>
+        <p className="text-xs text-slate-500 mb-4">Email <strong>{t?.email}</strong> não pode ser alterado (vinculado ao login).</p>
+        <SettingsForm
+          initialName={t?.name ?? ''}
+          initialLens={t?.clinical_lens ?? null}
+          initialIngestSource={t?.ingest_source ?? 'fireflies'}
+          lines={(lines ?? []) as { slug: string; name_pt: string }[]}
+        />
+      </section>
 
       <section className="bg-white rounded-xl border border-slate-200 p-6 mb-6">
         <h2 className="text-base font-semibold text-slate-900 mb-4">Conta</h2>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-sm">
-          <Field label="Nome" value={t?.name ?? '—'} />
           <Field label="Email" value={t?.email ?? '—'} />
           <Field label="Conta criada em" value={t?.created_at ? t.created_at.slice(0, 10) : '—'} />
           <Field label="Plano contratado" value={t?.plan ?? '—'} />
+          <Field label="Limite de sessões" value={t?.sessions_limit?.toString() ?? '—'} />
         </div>
       </section>
 
@@ -51,7 +69,6 @@ export default async function SettingsPage() {
         </div>
 
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-sm mb-6">
-          <Field label="Limite de sessões" value={t?.sessions_limit?.toString() ?? '—'} />
           <Field
             label="Próxima cobrança / fim do período"
             value={t?.subscription_current_period_end ? t.subscription_current_period_end.slice(0, 10) : '—'}
