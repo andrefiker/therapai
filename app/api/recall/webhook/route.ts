@@ -62,6 +62,12 @@ interface RecallParticipant {
 
 interface RecallBotResponse {
   id: string;
+  // metadata set at bot-creation time. We embed therapai_therapist_id here when
+  // we launch the bot ourselves (lib/recall.ts createBotForTherapist), so the
+  // resolver can route the resulting transcript without inferring tenancy from
+  // attendee emails (cleaner for tester accounts where the therapist isn't
+  // necessarily in the participants list).
+  metadata?: Record<string, unknown>;
   meeting_url?: { meeting_id?: string; platform?: string };
   meeting_metadata?: { title?: string | null };
   meeting_participants?: RecallParticipant[];
@@ -160,42 +166,75 @@ function speakerCounts(segments: RecallTranscriptSegment[]): { name: string; cou
 
 // ─── Therapist resolution ─────────────────────────────────────────────────────
 
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/**
+ * Resolve which therapai_therapists row owns the meeting whose transcript
+ * just arrived. Priority order (highest signal first):
+ *
+ *   1. bot.metadata.therapai_therapist_id  — explicit assignment baked in
+ *      when WE launched the bot (lib/recall.ts createBotForTherapist).
+ *      Validated against an actual tenant row before trust.
+ *   2. is_host email match in meeting_participants → therapai_therapists.email
+ *   3. any participant email match
+ *   4. calendar_meeting organizer / attendees email match
+ *   5. FALLBACK_THERAPIST_ID (André's tenant by default; env-overrideable)
+ *
+ * The metadata path is the canonical model for the "one Recall workspace,
+ * many testers" operational mode (André's account launches all bots,
+ * stamps each one with the right tenant id).
+ */
 async function resolveTherapistId(
   supabase: SupabaseClient,
   bot: RecallBotResponse,
-): Promise<string> {
-  const emails: string[] = [];
-  for (const p of bot.meeting_participants ?? []) {
-    if (p.email) emails.push(p.email.toLowerCase().trim());
+): Promise<{ id: string; via: 'metadata' | 'host_email' | 'participant_email' | 'calendar_email' | 'fallback' }> {
+  // 1. Trust explicit metadata IF it points at a real tenant.
+  const metaId = bot.metadata?.therapai_therapist_id;
+  if (typeof metaId === 'string' && UUID_RE.test(metaId)) {
+    const { data: hit } = await supabase
+      .from('therapai_therapists')
+      .select('id')
+      .eq('id', metaId)
+      .maybeSingle();
+    if (hit) return { id: hit.id, via: 'metadata' };
   }
+
+  // 2-4. Email-based resolution (fallback when metadata absent or invalid).
+  const participantEmails: string[] = [];
+  for (const p of bot.meeting_participants ?? []) {
+    if (p.email) participantEmails.push(p.email.toLowerCase().trim());
+  }
+  const calendarEmails: string[] = [];
   for (const cm of bot.calendar_meetings ?? []) {
-    if (cm.organizer_email) emails.push(cm.organizer_email.toLowerCase().trim());
+    if (cm.organizer_email) calendarEmails.push(cm.organizer_email.toLowerCase().trim());
     for (const a of cm.attendees ?? []) {
-      if (a.email) emails.push(a.email.toLowerCase().trim());
+      if (a.email) calendarEmails.push(a.email.toLowerCase().trim());
     }
   }
-  const filtered = [...new Set(emails)].filter((e) => e.length > 0 && e.includes('@'));
-  if (filtered.length === 0) return FALLBACK_THERAPIST_ID;
+  const allEmails = [...new Set([...participantEmails, ...calendarEmails])]
+    .filter((e) => e.length > 0 && e.includes('@'));
+  if (allEmails.length === 0) return { id: FALLBACK_THERAPIST_ID, via: 'fallback' };
 
-  const { data } = await supabase
+  const { data: rows } = await supabase
     .from('therapai_therapists')
     .select('id, email')
-    .in('email', filtered);
-  if (!data || data.length === 0) return FALLBACK_THERAPIST_ID;
+    .in('email', allEmails);
+  if (!rows || rows.length === 0) return { id: FALLBACK_THERAPIST_ID, via: 'fallback' };
 
-  // Prefer the host's email if available
   const hostEmail = (bot.meeting_participants ?? []).find((p) => p.is_host)?.email?.toLowerCase().trim();
   if (hostEmail) {
-    const hit = data.find((r) => r.email.toLowerCase() === hostEmail);
-    if (hit) return hit.id;
+    const hit = rows.find((r) => r.email.toLowerCase() === hostEmail);
+    if (hit) return { id: hit.id, via: 'host_email' };
   }
-
-  // Otherwise: first match in priority order of candidates
-  for (const e of filtered) {
-    const hit = data.find((r) => r.email.toLowerCase() === e);
-    if (hit) return hit.id;
+  for (const e of participantEmails) {
+    const hit = rows.find((r) => r.email.toLowerCase() === e);
+    if (hit) return { id: hit.id, via: 'participant_email' };
   }
-  return FALLBACK_THERAPIST_ID;
+  for (const e of calendarEmails) {
+    const hit = rows.find((r) => r.email.toLowerCase() === e);
+    if (hit) return { id: hit.id, via: 'calendar_email' };
+  }
+  return { id: FALLBACK_THERAPIST_ID, via: 'fallback' };
 }
 
 // ─── Session row management ───────────────────────────────────────────────────
@@ -308,7 +347,9 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   const transcriptText = flattenSegments(segments);
 
   // 3. Resolve therapist
-  const therapistId = await resolveTherapistId(supabase, bot);
+  const resolved = await resolveTherapistId(supabase, bot);
+  const therapistId = resolved.id;
+  console.log('[recall][webhook] therapist resolved', { botId, therapistId, via: resolved.via });
 
   // 4. Upsert session row (recall_bot_id idempotency)
   const sessionDate = normalizeSessionDate(bot.recording?.completed_at ?? bot.recording?.started_at);

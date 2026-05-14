@@ -1,5 +1,7 @@
 import { createSupabaseServer } from '@/lib/supabase'
 import { audit } from '@/lib/audit'
+import { getTherapist } from '@/lib/viewer'
+import { RecallLaunchBox } from '@/components/RecallLaunchBox'
 import Link from 'next/link'
 
 export const revalidate = 0
@@ -13,6 +15,8 @@ export default async function HomePage() {
   const supabase = await createSupabaseServer()
   const { data: { user } } = await supabase.auth.getUser()
   // Layout already gated this route on a therapai_therapists row existing.
+  const therapist = await getTherapist(supabase, user)
+  const showRecallLauncher = therapist?.ingest_source === 'recall'
 
   const mk = (table: string) => supabase.from(table).select('id', { count: 'exact', head: true })
   const [patientsCount, sessionsCount, analysesCount, patients] = await Promise.all([
@@ -69,6 +73,8 @@ export default async function HomePage() {
           </div>
         ))}
       </div>
+
+      {showRecallLauncher && <RecallLaunchBox />}
 
       {stats.patients === 0 && (
         <div className="bg-indigo-50 border border-indigo-100 rounded-xl p-6 mb-8">
