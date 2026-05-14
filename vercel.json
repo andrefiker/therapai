@@ -1,8 +1,4 @@
 {
-  "crons": [
-    {
-      "path": "/api/cron/scan-calendars",
-      "schedule": "*/10 * * * *"
-    }
-  ]
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "_notes": "Vercel cron temporarily disabled — Hobby tier limits crons to daily, which defeats the 10-minute calendar-scan purpose. Re-add the crons[] block once on Pro: { path: /api/cron/scan-calendars, schedule: '*/10 * * * *' }. Until then the endpoint can be hit by an external scheduler (GitHub Actions, cron-job.org, Uptime Robot, etc.) with Authorization: Bearer $CRON_SECRET."
 }
