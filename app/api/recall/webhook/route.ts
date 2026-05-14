@@ -28,7 +28,10 @@ export const maxDuration = 300;
 
 const RECALL_WEBHOOK_SECRET = process.env.RECALL_WEBHOOK_SECRET ?? '';
 const RECALL_API_KEY = process.env.RECALL_API_KEY ?? '';
-const RECALL_API_BASE = process.env.RECALL_API_BASE ?? 'https://us-east-1.recall.ai/api/v1';
+// Region-scoped Recall API base. Defaults to us-west-2 (André's workspace);
+// override via RECALL_API_BASE env var if the operator workspace lives elsewhere
+// (us-east-1, eu-central-1, ap-northeast-1).
+const RECALL_API_BASE = process.env.RECALL_API_BASE ?? 'https://us-west-2.recall.ai/api/v1';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -63,75 +66,38 @@ interface RecallTranscriptSegment {
 
 // ─── Signature verification (Svix-format) ─────────────────────────────────────
 
-// Diagnostic-mode signature verification: returns structured reason+lengths
-// so the bad_signature 401 response body surfaces what knob is wrong. Strip
-// after we've identified the cause; do NOT keep diag in 401 bodies long-term.
-interface SignatureDiag {
-  ok: boolean;
-  reason?: string;
-  diag?: Record<string, unknown>;
-}
-
-function verifySignatureDiag(req: NextRequest, rawBody: string): SignatureDiag {
-  if (!RECALL_WEBHOOK_SECRET) return { ok: false, reason: 'env_secret_empty' };
-
+// Svix-format signature verification per Recall webhook docs.
+function verifySignature(req: NextRequest, rawBody: string): boolean {
+  if (!RECALL_WEBHOOK_SECRET) return false;
   const id = req.headers.get('webhook-id');
   const ts = req.headers.get('webhook-timestamp');
   const sigHeader = req.headers.get('webhook-signature');
-  if (!id || !ts || !sigHeader) {
-    return { ok: false, reason: 'missing_headers', diag: { has_id: !!id, has_ts: !!ts, has_sig: !!sigHeader } };
-  }
+  if (!id || !ts || !sigHeader) return false;
 
   const now = Math.floor(Date.now() / 1000);
   const tsNum = parseInt(ts, 10);
-  if (!Number.isFinite(tsNum) || Math.abs(now - tsNum) > 300) {
-    return { ok: false, reason: 'stale_timestamp', diag: { now, tsNum, skew: now - tsNum } };
-  }
+  if (!Number.isFinite(tsNum) || Math.abs(now - tsNum) > 300) return false;
 
-  const hasPrefix = RECALL_WEBHOOK_SECRET.startsWith('whsec_');
-  const secretRaw = hasPrefix ? RECALL_WEBHOOK_SECRET.slice(6) : RECALL_WEBHOOK_SECRET;
+  const secretRaw = RECALL_WEBHOOK_SECRET.startsWith('whsec_')
+    ? RECALL_WEBHOOK_SECRET.slice(6)
+    : RECALL_WEBHOOK_SECRET;
   const key = Buffer.from(secretRaw, 'base64');
 
   const toSign = `${id}.${ts}.${rawBody}`;
   const expected = createHmac('sha256', key).update(toSign).digest('base64');
+  const expectedBuf = Buffer.from(expected, 'base64');
 
-  const candidates = sigHeader.split(' ');
-  for (const candidate of candidates) {
+  for (const candidate of sigHeader.split(' ')) {
     const [version, sig] = candidate.split(',');
     if (version !== 'v1' || !sig) continue;
     try {
       const sigBuf = Buffer.from(sig, 'base64');
-      const expectedBuf = Buffer.from(expected, 'base64');
-      if (sigBuf.length === expectedBuf.length && timingSafeEqual(sigBuf, expectedBuf)) return { ok: true };
+      if (sigBuf.length === expectedBuf.length && timingSafeEqual(sigBuf, expectedBuf)) return true;
     } catch {
-      /* fall through to mismatch diag */
+      /* fall through */
     }
   }
-
-  return {
-    ok: false,
-    reason: 'sig_mismatch',
-    diag: {
-      env_secret_has_whsec_prefix: hasPrefix,
-      env_secret_total_len: RECALL_WEBHOOK_SECRET.length,
-      env_secret_post_strip_len: secretRaw.length,
-      env_secret_decoded_key_bytes: key.length,
-      raw_body_byte_len: Buffer.byteLength(rawBody, 'utf8'),
-      to_sign_byte_len: Buffer.byteLength(toSign, 'utf8'),
-      webhook_id_len: id.length,
-      webhook_id_head8: id.slice(0, 8),
-      webhook_id_tail8: id.slice(-8),
-      webhook_ts: tsNum,
-      skew_seconds: now - tsNum,
-      sig_header_total_len: sigHeader.length,
-      sig_candidates_count: candidates.length,
-      expected_b64_len: expected.length,
-      expected_head6: expected.slice(0, 6),
-      expected_tail6: expected.slice(-6),
-      first_candidate_v1_value_head6: (candidates[0]?.split(',')[1] ?? '').slice(0, 6),
-      first_candidate_v1_value_tail6: (candidates[0]?.split(',')[1] ?? '').slice(-6),
-    },
-  };
+  return false;
 }
 
 // ─── Recall API ───────────────────────────────────────────────────────────────
@@ -167,9 +133,8 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
 
   const rawBody = await req.text();
 
-  const sig = verifySignatureDiag(req, rawBody);
-  if (!sig.ok) {
-    return NextResponse.json({ error: 'bad_signature', reason: sig.reason, diag: sig.diag }, { status: 401 });
+  if (!verifySignature(req, rawBody)) {
+    return NextResponse.json({ error: 'bad_signature' }, { status: 401 });
   }
 
   let payload: RecallWebhookPayload;
