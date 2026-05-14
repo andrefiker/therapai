@@ -14,11 +14,15 @@ export async function PATCH(request: NextRequest) {
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return NextResponse.json({ error: 'unauthorized' }, { status: 401 })
 
-  let body: { name?: string; clinical_lens?: string; ingest_source?: string }
+  let body: { name?: string; clinical_lens?: string; ingest_source?: string; auto_launch_calendar_bot?: boolean }
   try { body = await request.json() }
   catch { return NextResponse.json({ error: 'invalid_json' }, { status: 400 }) }
 
-  const updates: Record<string, string> = {}
+  const updates: Record<string, string | boolean> = {}
+
+  if (typeof body.auto_launch_calendar_bot === 'boolean') {
+    updates.auto_launch_calendar_bot = body.auto_launch_calendar_bot
+  }
 
   if (typeof body.name === 'string') {
     const name = body.name.trim()
