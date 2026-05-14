@@ -163,16 +163,45 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     }
     const transcriptText = await fetchTranscriptText(downloadUrl);
 
-    // TODO (RECALL milestone 4): branch on therapai_therapists.ingest_source.
-    // For now, this route exists but does NOT yet write to therapai_sessions
-    // or invoke the analysis pipeline. That wiring lands once ingest_source
-    // is added to the schema and we decide whether to mirror Fireflies' flow
-    // (idempotency on bot.id → insert processing row → run molar → save analysis
-    // → rebuild longitudinal) or run a leaner first-pass.
+    // ────────────────────────────────────────────────────────────────────────
+    // M4 WIRING (deferred to first real Recall bot run, expected next session):
     //
-    // Until then this handler validates signature + fetches transcript + returns
-    // a confirmation, which is the minimum to verify the end-to-end Recall plumbing
-    // works against your sandbox.
+    // The persistence + analysis pipeline already exists, inlined inside
+    // app/api/webhook/route.ts (Fireflies path). To wire Recall to it:
+    //
+    // 1. Extract the helpers from app/api/webhook/route.ts into a shared module
+    //    e.g. lib/ingest.ts exporting:
+    //      - resolveTherapistId(supabase, candidateEmails)
+    //      - matchOrNullPatient(supabase, therapistId, candidateName)
+    //      - upsertProcessingSession(supabase, therapistId, existingId,
+    //          sourceId, sessionDate, transcriptText)
+    //      - runMolarAndPersist(supabase, therapistId, sessionId, patientId, ...)
+    //      - runMolecularAndPersist(...)
+    //      - extractAndSaveAssertions(...)
+    //      - rebuildLongitudinalForPatient(...)
+    //
+    // 2. Map Recall payload into the shared helpers' inputs:
+    //      candidateEmails = bot.meeting_metadata.attendees.map(a => a.email)
+    //          ?? bot.meeting_url.organizer_email
+    //          ?? [bot.calendar_meeting?.organizer_email].filter(Boolean)
+    //      sourceId        = bot.id  (replaces fireflies_id; needs schema-level
+    //                                  source_kind column or a separate recall_bot_id)
+    //      sessionDate     = bot.recording.completed_at ?? new Date()
+    //      candidateName   = bot.meeting_metadata.title  (heuristic same as Fireflies)
+    //
+    // 3. Add to therapai_sessions a `source` column: 'fireflies' | 'recall' so
+    //    we can disambiguate idempotency keys (fireflies_id vs recall_bot_id).
+    //    Migration not yet applied.
+    //
+    // 4. Branch the operator's ingest_source preference (already a column on
+    //    therapai_therapists) to short-circuit if a tester is on 'fireflies'
+    //    only — return 200 ignored.
+    //
+    // Until that extraction lands, this handler validates signature + fetches
+    // the transcript + returns a confirmation. Sufficient to verify end-to-end
+    // Recall plumbing in sandbox; insufficient for production ingest. Step 1
+    // is the gating item — without the extraction, the recall handler would
+    // duplicate ~700 lines of molar/molecular/longitudinal logic.
 
     console.log('[recall][webhook] transcript fetched', {
       botId,

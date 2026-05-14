@@ -108,7 +108,9 @@ export default function DpaPage() {
           <li><strong>Vercel</strong> — hospedagem e execução da aplicação.</li>
           <li><strong>Anthropic</strong> — inferência via API (Claude), retenção zero.</li>
           <li><strong>OpenAI</strong> — inferência via API (GPT) em fallback, retenção zero.</li>
-          <li><strong>Fireflies.ai</strong> — captura de transcrição, apenas quando integrado pelo controlador.</li>
+          <li><strong>Fireflies.ai</strong> — captura de transcrição (legado), apenas quando integrado pelo controlador.</li>
+          <li><strong>Recall.ai</strong> (us-west-2) — bot de gravação e transcrição em Google Meet / Zoom / Teams, apenas quando o controlador opta por essa fonte de ingestão. DPA solicitada em 2026-05-13; aguardando devolutiva.</li>
+          <li><strong>Stripe</strong> — processamento de pagamento. Dados clínicos não trafegam por este sub-operador; apenas dados de cobrança.</li>
         </ul>
         <p>
           Alterações materiais nessa lista serão comunicadas com antecedência
