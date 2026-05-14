@@ -63,37 +63,79 @@ interface RecallTranscriptSegment {
 
 // ─── Signature verification (Svix-format) ─────────────────────────────────────
 
+// Non-sensitive diagnostic — length-only + safe head/tail for visual sanity check.
+// NEVER log full secrets or full signatures here.
+function diagSnapshot(label: string, s: string): Record<string, unknown> {
+  return {
+    [`${label}_len`]: s.length,
+    [`${label}_head4`]: s.slice(0, 4),
+    [`${label}_tail4`]: s.slice(-4),
+  };
+}
+
 function verifySignature(req: NextRequest, rawBody: string): boolean {
-  if (!RECALL_WEBHOOK_SECRET) return false;
+  if (!RECALL_WEBHOOK_SECRET) {
+    console.error('[recall][webhook][diag] reject reason: env_secret_empty');
+    return false;
+  }
 
   const id = req.headers.get('webhook-id');
   const ts = req.headers.get('webhook-timestamp');
   const sigHeader = req.headers.get('webhook-signature');
-  if (!id || !ts || !sigHeader) return false;
+  if (!id || !ts || !sigHeader) {
+    console.error('[recall][webhook][diag] reject reason: missing_headers', {
+      has_id: !!id, has_ts: !!ts, has_sig: !!sigHeader,
+    });
+    return false;
+  }
 
   // Reject replays older than 5 minutes
   const now = Math.floor(Date.now() / 1000);
   const tsNum = parseInt(ts, 10);
-  if (!Number.isFinite(tsNum) || Math.abs(now - tsNum) > 300) return false;
+  if (!Number.isFinite(tsNum) || Math.abs(now - tsNum) > 300) {
+    console.error('[recall][webhook][diag] reject reason: stale_timestamp', { now, tsNum, skew: now - tsNum });
+    return false;
+  }
 
-  // whsec_ prefix is convention; key material after it is base64-encoded
-  const secretRaw = RECALL_WEBHOOK_SECRET.startsWith('whsec_')
-    ? RECALL_WEBHOOK_SECRET.slice(6)
-    : RECALL_WEBHOOK_SECRET;
+  const hasPrefix = RECALL_WEBHOOK_SECRET.startsWith('whsec_');
+  const secretRaw = hasPrefix ? RECALL_WEBHOOK_SECRET.slice(6) : RECALL_WEBHOOK_SECRET;
   const key = Buffer.from(secretRaw, 'base64');
 
   const toSign = `${id}.${ts}.${rawBody}`;
   const expected = createHmac('sha256', key).update(toSign).digest('base64');
 
-  // Header format: "v1,<base64>" possibly space-separated for multiple versions
   const candidates = sigHeader.split(' ');
   for (const candidate of candidates) {
     const [version, sig] = candidate.split(',');
     if (version !== 'v1' || !sig) continue;
-    const sigBuf = Buffer.from(sig, 'base64');
-    const expectedBuf = Buffer.from(expected, 'base64');
-    if (sigBuf.length === expectedBuf.length && timingSafeEqual(sigBuf, expectedBuf)) return true;
+    try {
+      const sigBuf = Buffer.from(sig, 'base64');
+      const expectedBuf = Buffer.from(expected, 'base64');
+      if (sigBuf.length === expectedBuf.length && timingSafeEqual(sigBuf, expectedBuf)) return true;
+    } catch (e) {
+      console.error('[recall][webhook][diag] sig compare threw', (e as Error).message);
+    }
   }
+
+  // Did not match. Emit length/head/tail diagnostic so we can tell which knob is wrong.
+  console.error('[recall][webhook][diag] sig_mismatch', {
+    env_secret_has_whsec_prefix: hasPrefix,
+    env_secret_total_len: RECALL_WEBHOOK_SECRET.length,
+    env_secret_post_strip_len: secretRaw.length,
+    env_secret_decoded_key_bytes: key.length,
+    raw_body_byte_len: Buffer.byteLength(rawBody, 'utf8'),
+    to_sign_byte_len: Buffer.byteLength(toSign, 'utf8'),
+    webhook_id_len: id.length,
+    webhook_ts: tsNum,
+    skew_seconds: now - tsNum,
+    sig_header_full: sigHeader.length,
+    sig_candidates_count: candidates.length,
+    ...diagSnapshot('expected_b64', expected),
+    ...diagSnapshot('first_candidate_after_v1', candidates[0]?.split(',')[1] ?? ''),
+    // Recall-side header echo (safe — Recall already broadcasts these)
+    webhook_id_head8: id.slice(0, 8),
+    webhook_id_tail8: id.slice(-8),
+  });
   return false;
 }
 
