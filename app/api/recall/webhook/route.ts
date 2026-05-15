@@ -75,7 +75,20 @@ interface RecallBotResponse {
     organizer_email?: string | null;
     attendees?: Array<{ email?: string | null }>;
   }>;
+  // Legacy top-level recording shape (still present on older bots).
   recording?: { completed_at?: string | null; started_at?: string | null };
+  // Current shape (2026-05-15+): transcript + recording live under each
+  // recording in the recordings[] array; bot.media_shortcuts is empty.
+  recordings?: Array<{
+    id: string;
+    started_at?: string | null;
+    completed_at?: string | null;
+    media_shortcuts?: {
+      transcript?: { data?: { download_url?: string } };
+    };
+  }>;
+  // Legacy field — kept for back-compat with pre-2026-05 bots that may still
+  // surface here.
   media_shortcuts?: {
     transcript?: { data?: { download_url?: string } };
   };
@@ -333,7 +346,12 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     return NextResponse.json({ error: 'fetch_bot_failed', message: (err as Error).message }, { status: 502 });
   }
 
-  const downloadUrl = bot.media_shortcuts?.transcript?.data?.download_url;
+  // Recall API schema (2026-05-15+): transcript URL lives under the recording
+  // record, not the top-level bot. Prefer the new path; fall back to legacy
+  // for any older bots that still surface bot.media_shortcuts.transcript.
+  const recordingTranscript = bot.recordings?.[0]?.media_shortcuts?.transcript?.data?.download_url;
+  const legacyTranscript = bot.media_shortcuts?.transcript?.data?.download_url;
+  const downloadUrl = recordingTranscript ?? legacyTranscript;
   if (!downloadUrl) {
     return NextResponse.json({ error: 'no_transcript_download_url', botId }, { status: 422 });
   }
@@ -352,7 +370,12 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   console.log('[recall][webhook] therapist resolved', { botId, therapistId, via: resolved.via });
 
   // 4. Upsert session row (recall_bot_id idempotency)
-  const sessionDate = normalizeSessionDate(bot.recording?.completed_at ?? bot.recording?.started_at);
+  const sessionDate = normalizeSessionDate(
+    bot.recordings?.[0]?.completed_at ??
+      bot.recordings?.[0]?.started_at ??
+      bot.recording?.completed_at ??
+      bot.recording?.started_at,
+  );
   let sessionResult: { sessionId: string; alreadyDone: boolean };
   try {
     sessionResult = await upsertProcessingSession(supabase, therapistId, botId, sessionDate, transcriptText);
