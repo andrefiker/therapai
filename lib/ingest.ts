@@ -802,6 +802,24 @@ export async function rebuildLongitudinalForPatient(
  * failures are caught and reported in the return value but do not throw.
  */
 export async function runFullAnalysisPipeline(ctx: IngestContext): Promise<PipelineResult> {
+  // 0. Passive transcript-quality probe — warn if the session looks dead-mic
+  // (low char-per-minute ratio) so we catch garbage before spending inference
+  // tokens. Doesn't block; downstream analysis still runs.
+  // Threshold: ~100 chars/min covers normal therapy speech with pauses;
+  // anything below is almost always silence, dropped audio, or wrong-language
+  // detection. Tune in production by inspecting low_signal_transcript logs.
+  const durationMin = Math.max(ctx.meta.durationMin || 0, 0.5);
+  const charsPerMin = ctx.transcriptText.length / durationMin;
+  if (charsPerMin < 100) {
+    console.warn('[ingest] low_signal_transcript', {
+      sessionId: ctx.sessionId,
+      therapistId: ctx.therapistId,
+      transcriptChars: ctx.transcriptText.length,
+      durationMin,
+      charsPerMin: Math.round(charsPerMin),
+    });
+  }
+
   // 1. Molar (gating)
   const molar = await runMolarAndPersist(ctx);
 

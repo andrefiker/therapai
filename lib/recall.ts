@@ -74,7 +74,9 @@ export async function createBotForTherapist(input: CreateBotInput): Promise<Crea
       transcript: {
         provider: {
           recallai_streaming: {
-            language_code: 'auto',
+            // TherapAI is PT-only at the clinical layer; explicit beats auto
+            // for first-second accuracy per docs.recall.ai/docs/recallai-streaming-transcription.
+            language_code: 'pt',
           },
         },
       },
