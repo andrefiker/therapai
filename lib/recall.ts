@@ -64,12 +64,21 @@ export async function createBotForTherapist(input: CreateBotInput): Promise<Crea
       launched_at: new Date().toISOString(),
       ...(input.extraMetadata ?? {}),
     },
-    // Default: have Recall transcribe automatically (via Recall's built-in pipeline).
-    // If the operator workspace already has a default transcription provider,
-    // this still works; Recall accepts the field and uses workspace defaults
-    // when sub-fields are omitted.
-    transcription_options: { provider: 'meeting_captions' },
-    // We only need real-time recording; chat/recording defaults are fine.
+    // Recall.ai current schema (2026-05-15+): transcription is configured
+    // under `recording_config.transcript.provider.<provider_name>`. The
+    // deprecated `transcription_options` field is now rejected with 400.
+    // We use `recallai_streaming` (Recall's native provider) — works
+    // across Meet/Zoom/Teams without requiring participants to enable
+    // captions, and language detection handles PT/EN mixed sessions.
+    recording_config: {
+      transcript: {
+        provider: {
+          recallai_streaming: {
+            language_code: 'auto',
+          },
+        },
+      },
+    },
   };
 
   const res = await fetch(`${RECALL_API_BASE}/bot`, {
