@@ -40,8 +40,12 @@ const RECALL_API_BASE = process.env.RECALL_API_BASE ?? 'https://us-west-2.recall
 const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL!;
 const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY!;
 
-const FALLBACK_THERAPIST_ID =
-  process.env.THERAPAI_FALLBACK_THERAPIST_ID ?? '60fdab49-c4dd-45cc-9e2b-51bec3504d35';
+// Multi-tenant strict-mode cleanup 2026-05-15:
+// THERAPAI_FALLBACK_THERAPIST_ID is OPTIONAL. When unset (recommended for
+// multi-tenant production), webhooks with no resolvable tenant (no metadata,
+// no email match) return HTTP 422 instead of routing to a hardcoded tenant.
+const FALLBACK_THERAPIST_ID: string | null =
+  process.env.THERAPAI_FALLBACK_THERAPIST_ID || null;
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -191,7 +195,9 @@ const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
  *   2. is_host email match in meeting_participants → therapai_therapists.email
  *   3. any participant email match
  *   4. calendar_meeting organizer / attendees email match
- *   5. FALLBACK_THERAPIST_ID (André's tenant by default; env-overrideable)
+ *   5. FALLBACK_THERAPIST_ID — only when THERAPAI_FALLBACK_THERAPIST_ID env
+ *      is set. In strict multi-tenant mode (no env), unresolved tenancy
+ *      returns { id: null, via: 'unresolved' } and the handler returns 422.
  *
  * The metadata path is the canonical model for the "one Recall workspace,
  * many testers" operational mode (André's account launches all bots,
@@ -200,7 +206,7 @@ const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 async function resolveTherapistId(
   supabase: SupabaseClient,
   bot: RecallBotResponse,
-): Promise<{ id: string; via: 'metadata' | 'host_email' | 'participant_email' | 'calendar_email' | 'fallback' }> {
+): Promise<{ id: string | null; via: 'metadata' | 'host_email' | 'participant_email' | 'calendar_email' | 'fallback' | 'unresolved' }> {
   // 1. Trust explicit metadata IF it points at a real tenant.
   const metaId = bot.metadata?.therapai_therapist_id;
   if (typeof metaId === 'string' && UUID_RE.test(metaId)) {
@@ -226,13 +232,17 @@ async function resolveTherapistId(
   }
   const allEmails = [...new Set([...participantEmails, ...calendarEmails])]
     .filter((e) => e.length > 0 && e.includes('@'));
-  if (allEmails.length === 0) return { id: FALLBACK_THERAPIST_ID, via: 'fallback' };
+  const fallbackResult = FALLBACK_THERAPIST_ID
+    ? { id: FALLBACK_THERAPIST_ID, via: 'fallback' as const }
+    : { id: null, via: 'unresolved' as const };
+
+  if (allEmails.length === 0) return fallbackResult;
 
   const { data: rows } = await supabase
     .from('therapai_therapists')
     .select('id, email')
     .in('email', allEmails);
-  if (!rows || rows.length === 0) return { id: FALLBACK_THERAPIST_ID, via: 'fallback' };
+  if (!rows || rows.length === 0) return fallbackResult;
 
   const hostEmail = (bot.meeting_participants ?? []).find((p) => p.is_host)?.email?.toLowerCase().trim();
   if (hostEmail) {
@@ -247,7 +257,7 @@ async function resolveTherapistId(
     const hit = rows.find((r) => r.email.toLowerCase() === e);
     if (hit) return { id: hit.id, via: 'calendar_email' };
   }
-  return { id: FALLBACK_THERAPIST_ID, via: 'fallback' };
+  return fallbackResult;
 }
 
 // ─── Session row management ───────────────────────────────────────────────────
@@ -364,8 +374,19 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   }
   const transcriptText = flattenSegments(segments);
 
-  // 3. Resolve therapist
+  // 3. Resolve therapist. Strict mode: if neither metadata nor email matches
+  // a tenant AND no fallback is configured, refuse with 422 rather than
+  // landing the transcript in the wrong tenant.
   const resolved = await resolveTherapistId(supabase, bot);
+  if (!resolved.id) {
+    console.warn('[recall][webhook] tenant_unresolved', { botId, via: resolved.via });
+    return NextResponse.json({
+      ok: false,
+      error: 'tenant_unresolved',
+      message: 'Bot metadata had no therapai_therapist_id and no participant email matched a known tenant. Configure THERAPAI_FALLBACK_THERAPIST_ID or invite the clinician.',
+      botId,
+    }, { status: 422 });
+  }
   const therapistId = resolved.id;
   console.log('[recall][webhook] therapist resolved', { botId, therapistId, via: resolved.via });
 

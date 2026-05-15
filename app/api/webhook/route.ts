@@ -43,13 +43,16 @@ const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY!;
 const FIREFLIES_API_KEY = process.env.FIREFLIES_API_KEY!;
 const FIREFLIES_WEBHOOK_SECRET = process.env.FIREFLIES_WEBHOOK_SECRET!;
 
-// Multi-tenant pivot 2026-05-13: webhook resolves the owning therapist by
-// matching the Fireflies host_email/organizer_email/participants against
-// therapai_therapists.email. Falls back to FALLBACK_THERAPIST_ID when no
-// participant matches a known tenant. Service-role client bypasses RLS for
-// write side; the resolved id only needs to match an existing row.
-const FALLBACK_THERAPIST_ID =
-  process.env.THERAPAI_FALLBACK_THERAPIST_ID ?? '60fdab49-c4dd-45cc-9e2b-51bec3504d35';
+// Multi-tenant pivot 2026-05-13 + strict-mode cleanup 2026-05-15:
+// Webhook resolves the owning therapist by matching the Fireflies
+// host_email/organizer_email/participants against therapai_therapists.email.
+//
+// THERAPAI_FALLBACK_THERAPIST_ID is OPTIONAL. When set, unmatched transcripts
+// route to that tenant (legacy single-tenant behavior, useful for staging).
+// When UNSET (recommended for multi-tenant production), unmatched transcripts
+// return HTTP 422 instead of silently landing in a wrong tenant.
+const FALLBACK_THERAPIST_ID: string | null =
+  process.env.THERAPAI_FALLBACK_THERAPIST_ID || null;
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 interface FirefliesSentence {
@@ -90,7 +93,7 @@ interface MarkResult {
 async function resolveTherapistId(
   supabase: SupabaseClient,
   transcript: FirefliesTranscript,
-): Promise<string> {
+): Promise<string | null> {
   const candidates = [
     transcript.host_email,
     transcript.organizer_email,
@@ -195,6 +198,13 @@ async function markSessionWithStatus(
     return { ok: true, verified, sessionId };
   }
   // Upsert path — no existing sessionId. Capture the row id after upsert.
+  // Strict-mode: skip the upsert when no fallback tenant is configured. The
+  // error-marker row would be orphaned without a tenant anyway, and we don't
+  // want failed Fireflies fetches to bleed into a random tenant's view.
+  if (!FALLBACK_THERAPIST_ID) {
+    console.warn('[webhook] markSession skipped — no fallback tenant configured', { firefliesId, status, reason });
+    return { ok: true, verified: false, error: 'tenant_unresolved_skip_marker' };
+  }
   const { data, error } = await supabase
     .from('therapai_sessions')
     .upsert(
@@ -331,8 +341,23 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     return NextResponse.json({ ok: true, status: 'failed', reason: 'fireflies_fetch', save: mark });
   }
 
-  // 5. Resolve therapist (multi-tenant).
+  // 5. Resolve therapist (multi-tenant). Strict mode: if no fallback configured
+  // and no email match found, refuse the webhook with 422 rather than silently
+  // landing the transcript in a wrong tenant.
   const therapistId = await resolveTherapistId(supabase, transcript);
+  if (!therapistId) {
+    console.warn('[webhook] tenant_unresolved — no email match, no fallback configured', {
+      firefliesId,
+      host_email: transcript.host_email,
+      organizer_email: transcript.organizer_email,
+      participant_count: (transcript.participants ?? []).length,
+    });
+    return NextResponse.json({
+      ok: false,
+      error: 'tenant_unresolved',
+      message: 'No therapai_therapists row matched the meeting participants and THERAPAI_FALLBACK_THERAPIST_ID is not set. Either invite this clinician (insert into therapai_therapists) or set the fallback env var.',
+    }, { status: 422 });
+  }
   console.log('[webhook] therapist resolved', { firefliesId, therapistId });
 
   // 6. Upsert session row.
