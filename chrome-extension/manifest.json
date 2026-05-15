@@ -1,0 +1,32 @@
+{
+  "manifest_version": 3,
+  "name": "TherapAI Meet Launcher",
+  "version": "0.1.0",
+  "description": "Auto-launches the TherapAI recording bot whenever you open a Google Meet. Zero-click bot dispatch for clinicians.",
+  "permissions": ["tabs", "storage", "notifications"],
+  "host_permissions": [
+    "https://meet.google.com/*",
+    "https://therapai-one.vercel.app/*",
+    "https://therapai.app/*",
+    "https://*.therapai.app/*"
+  ],
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  },
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "TherapAI Meet Launcher",
+    "default_icon": {
+      "16": "icons/icon-16.png",
+      "48": "icons/icon-48.png",
+      "128": "icons/icon-128.png"
+    }
+  },
+  "icons": {
+    "16": "icons/icon-16.png",
+    "48": "icons/icon-48.png",
+    "128": "icons/icon-128.png"
+  },
+  "options_page": "options.html"
+}

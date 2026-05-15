@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>TherapAI Meet Launcher</title>
+  <style>
+    body { font-family: -apple-system, system-ui, sans-serif; width: 300px; padding: 14px; font-size: 13px; margin: 0; background: #fafafa; color: #111; }
+    h3 { margin: 0 0 10px; font-size: 14px; font-weight: 600; }
+    .row { display: flex; justify-content: space-between; align-items: center; margin: 6px 0; padding: 4px 0; border-bottom: 1px solid #eee; }
+    .row:last-of-type { border-bottom: none; }
+    .label { color: #666; }
+    .value { font-weight: 500; }
+    .ok { color: #0a7d34; }
+    .err { color: #b91c1c; }
+    .muted { color: #888; font-size: 11px; }
+    button { background: #3b82f6; color: white; border: none; padding: 6px 10px; border-radius: 4px; cursor: pointer; font-size: 12px; margin-top: 6px; }
+    button:hover { background: #2563eb; }
+    button.secondary { background: transparent; color: #3b82f6; border: 1px solid #3b82f6; }
+    .actions { display: flex; gap: 6px; margin-top: 10px; }
+    code { background: #f0f0f0; padding: 1px 4px; border-radius: 2px; font-size: 11px; }
+  </style>
+</head>
+<body>
+  <h3>TherapAI Meet Launcher</h3>
+  <div class="row"><span class="label">Status</span><span class="value ok">Active — watching for Meets</span></div>
+  <div class="row"><span class="label">API</span><span class="value muted" id="api">…</span></div>
+  <div class="row"><span class="label">Recent launches</span><span class="value" id="count">0</span></div>
+  <div class="row"><span class="label">Dedup window</span><span class="value muted">10 min per Meet URL</span></div>
+  <div class="actions">
+    <button id="options">Settings</button>
+    <button id="clear" class="secondary">Clear dedup</button>
+  </div>
+  <p class="muted" style="margin-top: 10px;">When you open a <code>meet.google.com</code> URL, the bot launches automatically. Click Admit when it knocks.</p>
+  <script src="popup.js"></script>
+</body>
+</html>
