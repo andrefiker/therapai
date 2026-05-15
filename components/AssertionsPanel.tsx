@@ -131,12 +131,8 @@ export function AssertionsPanel({ patientId, readOnly = false }: { patientId: st
     }
   }
 
-  async function bulk(ids: string[], action: 'confirm' | 'dismiss', label: string) {
+  async function bulk(ids: string[], action: 'confirm' | 'dismiss', _label: string) {
     if (ids.length === 0) return
-    if (ids.length > 1) {
-      const confirmed = window.confirm(`${action === 'confirm' ? 'Confirmar' : 'Descartar'} ${ids.length} afirmações em "${label}"?`)
-      if (!confirmed) return
-    }
     markActing(ids, true)
     try {
       const res = await fetch('/api/assertions/bulk', {

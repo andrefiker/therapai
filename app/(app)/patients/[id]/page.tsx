@@ -1,6 +1,8 @@
 import { createSupabaseServer } from '@/lib/supabase'
 import { audit } from '@/lib/audit'
 import { BriefingButton } from '@/components/BriefingButton'
+import { LongitudinalButton } from '@/components/LongitudinalButton'
+import { RelatoButton } from '@/components/RelatoButton'
 import { AssertionsPanel } from '@/components/AssertionsPanel'
 import { CaseChat } from '@/components/CaseChat'
 import Link from 'next/link'
@@ -126,18 +128,12 @@ export default async function PatientPage({ params }: { params: Promise<{ id: st
           <CaseChat patientId={patient.id} readOnly={false} />
           <AssertionsPanel patientId={patient.id} readOnly={false} />
           <BriefingButton patientId={patient.id} readOnly={false} />
-
-          {longitudinal && (
-            <div className="bg-white rounded-xl border border-slate-200 p-6">
-              <div className="flex items-center justify-between mb-4">
-                <h2 className="text-base font-semibold text-slate-900">Relatório Longitudinal</h2>
-                <span className="text-xs text-slate-400">
-                  {longitudinal.sessions_count} sessões · {longitudinal.period_start} → {longitudinal.period_end}
-                </span>
-              </div>
-              <MarkdownViewer md={longitudinal.report_md ?? ''} />
-            </div>
-          )}
+          <RelatoButton patientId={patient.id} readOnly={false} />
+          <LongitudinalButton
+            patientId={patient.id}
+            initialLongitudinal={longitudinal ?? null}
+            readOnly={false}
+          />
 
           {sessions.filter((s: any) => s.therapai_analyses?.length > 0).map((s: any) => {
             const molecular = s.therapai_molecular_analyses?.[0]

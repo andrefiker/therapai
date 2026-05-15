@@ -678,6 +678,10 @@ export async function extractAndSaveAssertions(ctx: IngestContext, analysisMd: s
   if (!prontuario) return 0;
   const assertions = deriveProntuarioAssertions(prontuario);
   if (assertions.length === 0) return 0;
+  // Auto-confirm at insert (André's call 2026-05-15): no human-in-the-loop
+  // confirmation step. Land assertions as already-confirmed so the UI shows
+  // them directly without the pending bucket.
+  const now = new Date().toISOString();
   const rows = assertions.map((a) => ({
     patient_id: ctx.patientId,
     therapist_id: ctx.therapistId,
@@ -689,7 +693,8 @@ export async function extractAndSaveAssertions(ctx: IngestContext, analysisMd: s
     confidence: null,
     source_kind: 'webhook_f1_json',
     model_emitted: null,
-    requires_confirmation: true,
+    requires_confirmation: false,
+    confirmed_by_clinician_at: now,
   }));
   const { error } = await ctx.supabase.from('therapai_patient_memory_assertions').insert(rows);
   if (error) throw new Error(`assertions_insert_failed: ${error.message}`);
@@ -701,6 +706,7 @@ export async function extractAndSaveMolecularAssertions(ctx: IngestContext, mole
   if (!molecular) return 0;
   const assertions = deriveMolecularAssertions(molecular);
   if (assertions.length === 0) return 0;
+  const now = new Date().toISOString();
   const rows = assertions.map((a) => ({
     patient_id: ctx.patientId,
     therapist_id: ctx.therapistId,
@@ -712,7 +718,8 @@ export async function extractAndSaveMolecularAssertions(ctx: IngestContext, mole
     confidence: null,
     source_kind: 'webhook_molecular_json',
     model_emitted: null,
-    requires_confirmation: true,
+    requires_confirmation: false,
+    confirmed_by_clinician_at: now,
   }));
   const { error } = await ctx.supabase.from('therapai_patient_memory_assertions').insert(rows);
   if (error) throw new Error(`molecular_assertions_insert_failed: ${error.message}`);
@@ -854,14 +861,12 @@ export async function runFullAnalysisPipeline(ctx: IngestContext): Promise<Pipel
   // (assertions from molecular were already attempted inside runMolecularAndPersist)
   const assertionsMolecularStatus: 'ok' | 'failed' | 'skipped' = molecularStatus === 'ok' ? 'ok' : 'skipped';
 
-  // 5. Longitudinal rebuild (best-effort)
-  let longitudinalStatus: 'ok' | 'failed' = 'ok';
-  try {
-    await rebuildLongitudinalForPatient(ctx.supabase, ctx.therapistId, ctx.patientId);
-  } catch (err) {
-    console.error('[ingest] longitudinal rebuild failed (non-fatal)', err);
-    longitudinalStatus = 'failed';
-  }
+  // 5. Longitudinal rebuild — REMOVED 2026-05-15 from auto-pipeline.
+  // André's call: don't auto-rebuild on every session ingest. The
+  // longitudinal report is now generated on-demand via the "Atualizar
+  // longitudinal" button on the patient page → POST /api/patient/[id]/longitudinal.
+  // Returned status is fixed to 'skipped' to preserve the PipelineResult shape.
+  const longitudinalStatus: 'ok' | 'failed' | 'skipped' = 'skipped';
 
   return {
     analysisMd: molar.analysisMd,
