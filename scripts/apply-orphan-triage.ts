@@ -28,7 +28,7 @@
 // Service-role key is sensitive in Vercel and `vercel env pull` may return
 // empty; copy it from another source if env is unavailable.
 
-import { createClient } from '@supabase/supabase-js';
+import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import { readFileSync, writeFileSync } from 'fs';
 
 interface Proposal {
@@ -85,7 +85,7 @@ async function main() {
   const opts = parseArgs();
 
   // Env only required for --apply; dry-run is offline.
-  let supabase: ReturnType<typeof createClient> | null = null;
+  let supabase: SupabaseClient | null = null;
   if (opts.apply) {
     const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
     const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
