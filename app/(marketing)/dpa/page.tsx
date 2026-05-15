@@ -109,7 +109,7 @@ export default function DpaPage() {
           <li><strong>Anthropic</strong> — inferência via API (Claude), retenção zero.</li>
           <li><strong>OpenAI</strong> — inferência via API (GPT) em fallback, retenção zero.</li>
           <li><strong>Fireflies.ai</strong> — captura de transcrição (legado), apenas quando integrado pelo controlador.</li>
-          <li><strong>Recall.ai</strong> (us-west-2) — bot de gravação e transcrição em Google Meet / Zoom / Teams, apenas quando o controlador opta por essa fonte de ingestão. DPA solicitada em 2026-05-13; aguardando devolutiva.</li>
+          <li><strong>Recall.ai</strong> (us-west-2) — bot de gravação e transcrição em Google Meet / Zoom / Teams, apenas quando o controlador opta por essa fonte de ingestão. <strong>DPA em vigor</strong> via opt-in automático no cadastro auto-atendimento, confirmado por escrito em 2026-05-14 pelo VP de Vendas. Texto integral em <a href="https://www.recall.ai/data-processing-agreement" target="_blank" rel="noopener noreferrer" className="underline">recall.ai/data-processing-agreement</a>. Sub-processadores listados em <a href="https://security.recall.ai/subprocessors" target="_blank" rel="noopener noreferrer" className="underline">security.recall.ai/subprocessors</a>.</li>
           <li><strong>Stripe</strong> — processamento de pagamento. Dados clínicos não trafegam por este sub-operador; apenas dados de cobrança.</li>
         </ul>
         <p>
