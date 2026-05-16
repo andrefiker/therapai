@@ -92,7 +92,11 @@ Atenciosamente,
 Psicólogo
 CRP 06/115147
 
-[Data do documento]`;
+[Data do documento]
+
+---
+
+> Nota: Este documento é uma síntese clínica produzida com apoio de ferramenta de análise automatizada (TherapAI) sobre o material das sessões realizadas por mim. Foi revisado e validado antes da entrega. O conteúdo é hipótese-gerador para o(a) profissional receptor(a); não substitui sua avaliação clínica direta.`;
 
 function buildUserPrompt(
   patientName: string,

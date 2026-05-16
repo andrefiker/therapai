@@ -196,18 +196,56 @@ As sessões abaixo são apresentadas em ordem cronológica com data explícita n
 - Refira-se a sessões por data (ex: "na sessão de 14/03/2026") ou por janela temporal ("nas primeiras 4 sessões de março", "no período pós-interrupção de 6 semanas em fevereiro").
 - Gaps prolongados entre sessões (marcados com ⚠) são fatos clínicos: interrupções, recaídas, retomadas. Comente quando relevantes.
 - Distinga padrões ESTÁVEIS (presentes em múltiplos momentos do tratamento) de MUDANÇAS (apareceram em data X, evoluíram em data Y).
-- Em "Movimentos de Mudança" (seção 3), ancore cada movimento em quando começou e em que sessão se consolidou.
-- Em "Estado Atual" (seção 5), reflita o que está vivo nas sessões MAIS RECENTES, não a média do período inteiro.
+- Em "Movimentos de Mudança", ancore cada movimento em quando começou e em que sessão se consolidou.
+- Em "Estado Atual", reflita o que está vivo nas sessões MAIS RECENTES, não a média do período inteiro.
+
+DISCIPLINA DE CONCRETUDE:
+- Nomes próprios de figuras relacionais (cônjuge, pais, sogros, irmãos, chefe, etc.) DEVEM aparecer com o nome que o paciente usa. Cada figura recebe caracterização funcional (antecedente / reforçador / punidor / mantenedor / aliado).
+- Quando nomear uma moldura RFT, nomeie o CONTEÚDO específico da moldura (ex: "conflito de quadros de coerência: Justiça-via-Mérito vs Família-como-Dádiva"). Listar tipos de moldura sem ancorar conteúdo é falha de especificidade.
+- Em "Análise Funcional Síntese", produza UMA fórmula central A → B → C → Função que captura o loop clínico operativo principal, não um catálogo de contingências.
 
 Seções obrigatórias:
+
 1. Trajetória do Caso (linha do tempo clínica — datas chave + janelas)
-2. Padrões Comportamentais Estáveis (com sinalização da janela em que aparecem)
-3. Movimentos de Mudança (data-de-início + data-de-consolidação por movimento)
-4. Análise RFT Longitudinal (molduras dominantes em cada fase do tratamento)
-5. Estado Atual (apenas o que está vivo nas sessões mais recentes)
-6. Vetores de Intervenção Prioritários
-7. Prognóstico Atualizado
-8. Indicadores de Alta / Reavaliação`;
+
+2. Identificação e Contexto Atual (snapshot consolidado: idade, ocupação, estado civil, status de saúde relevante, motivo original da terapia, motivo do contato terapêutico no período coberto — todos derivados das sessões, "Não consta" quando ausente)
+
+3. Padrões Comportamentais Estáveis (com sinalização da janela em que aparecem; integre regras verbais e esquemas de valores quando o paciente os verbaliza explicitamente)
+
+4. Dinâmica Familiar / Ecossistema Relacional e Mantenedores
+   - Para cada figura relacional saliente nas sessões: nome do paciente para ela → papel funcional (antecedente recorrente / reforçador positivo / reforçador negativo / punidor / mantenedor do padrão problema / aliado terapêutico).
+   - Mapear contingências que se sustentam no ecossistema (não no indivíduo isolado): quem reforça o quê, quem pune o quê, qual loop coletivo se autoperpetua.
+
+5. Análise Funcional Síntese
+   - UMA fórmula central capturando o loop operativo principal do caso:
+     - **Antecedente:** [contexto / estímulo recorrente]
+     - **Comportamento(s)-alvo:** [topografia + classe funcional]
+     - **Consequência imediata:** [o que reforça/mantém]
+     - **Função hipotetizada:** [esquiva experiencial / busca de validação / manutenção de regra / etc.]
+   - Se o caso tem 2 loops em competição (ex: aproximação vs esquiva), nomeie ambos.
+
+6. Movimentos de Mudança (data-de-início + data-de-consolidação por movimento)
+
+7. Análise RFT Longitudinal (molduras dominantes em cada fase, ancorando o CONTEÚDO específico das molduras, não apenas o tipo)
+
+8. Estado Atual (apenas o que está vivo nas sessões mais recentes)
+
+9. Vetores de Intervenção Prioritários
+
+10. Conduta Terapêutica — Reflexão sobre o(a) Próprio(a) Clínico(a)
+    - **Aliança terapêutica:** sinais de fortalecimento, tensão, ruptura, reparo ao longo das sessões. Cite trechos onde a aliança se mostrou.
+    - **Pacing e timing:** intervenções que foram introduzidas no momento certo; intervenções que podem ter sido prematuras ou tardias. Honesto, com tato.
+    - **Intervenções que funcionaram:** o que produziu mudança observável — para fortalecer no plano futuro.
+    - **Oportunidades possivelmente perdidas:** momentos em que algo clinicamente carregado emergiu e não foi explorado, ou foi explorado de modo que esquivou da intensidade. Use linguagem hipotética ("pode ter sido"), não acusatória.
+    - Esta seção é especialmente útil para supervisão clínica — é o espelho funcional, não julgamento.
+
+11. Prognóstico Atualizado e Indicadores de Alta / Reavaliação
+
+---
+
+**Nota final obrigatória ao fim do relatório:**
+
+> Este relatório é hipótese-gerador, destinado a apoiar formulação de caso e supervisão clínica. Não substitui julgamento clínico do(a) profissional responsável nem deve ser tratado como ditame prescritivo.`;
 
 // ─── Patient identification (source-agnostic) ─────────────────────────────────
 

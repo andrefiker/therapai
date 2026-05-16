@@ -40,10 +40,20 @@ ESTRUTURA OBRIGATÓRIA (8 seções):
 2. **Contingências não resolvidas** — loops clínicos abertos. Antecedente → comportamento-alvo → consequência. Cite a sessão.
 3. **Padrões de evitação ativos** — formas funcionais de esquiva/fuga, incluindo evitação experiencial e padrões de derivação relacional ligados a temas-âncora.
 4. **Mudanças recentes** — movimentos clínicos detectados nas últimas sessões. Direção (progressão / regressão / oscilação) + sinal específico.
-5. **Rupturas ou tensões na aliança terapêutica** — se houver sinal de aliança comprometida (resistência, retraimento, hostilidade encoberta, idealização), nomeie. Caso contrário, "Não há sinal claro".
+5. **Conduta terapêutica — espelho funcional do(a) clínico(a)** — quatro micro-blocos curtos, com tato e honestidade clínica:
+   - **Aliança:** sinais recentes de fortalecimento, tensão, ruptura ou reparo. Se nada saliente, "Aliança estável; nenhum sinal recente."
+   - **Pacing e timing:** intervenções recentes que entraram no momento certo; intervenções que podem ter sido prematuras ou tardias. Linguagem hipotética ("pode ter sido"), não acusatória.
+   - **Intervenções que funcionaram:** o que produziu mudança observável nas últimas sessões — para repetir/aprofundar.
+   - **Oportunidades possivelmente perdidas:** momentos em que algo clinicamente carregado emergiu e não foi explorado, ou foi explorado de modo que esquivou da intensidade. Útil para considerar retomar.
 6. **Foco sugerido para a próxima sessão** — UMA aposta clínica concreta. Por que esse foco agora? Que dado da sessão anterior justifica?
 7. **Riscos de desestabilização precoce** — temas que NÃO devem ser abertos agora. Por quê. Qual seria o sinal de que está pronto.
-8. **Citações-âncora** — 2 a 4 falas diretas do paciente das análises mais recentes (literais, entre aspas). Marque a data/sessão de cada citação.`;
+8. **Citações-âncora** — 2 a 4 falas diretas do paciente das análises mais recentes (literais, entre aspas). Marque a data/sessão de cada citação.
+
+---
+
+**Nota final obrigatória ao fim do briefing:**
+
+> Este briefing é hipótese-gerador, destinado a apoiar a preparação clínica e supervisão. Não substitui o julgamento clínico em sessão.`;
 
 function buildUserPrompt(
   patientName: string,
