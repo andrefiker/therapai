@@ -16,12 +16,14 @@ import { createSupabaseServer } from '@/lib/supabase';
 import { getTherapist } from '@/lib/viewer';
 import Anthropic from '@anthropic-ai/sdk';
 import OpenAI from 'openai';
+import { GoogleGenAI } from '@google/genai';
 
 export const runtime = 'nodejs';
 export const maxDuration = 60;
 
 const ANTHROPIC_MODEL = 'claude-opus-4-5';
 const OPENAI_MODEL = 'gpt-4o';
+const GEMINI_MODEL = 'gemini-3-pro';
 const DEFAULT_SESSIONS = 3;
 
 const BRIEFING_SYSTEM_PROMPT = `Você é assistente clínico do Dr. André Fiker, especialista em Análise do Comportamento e RFT.
@@ -106,7 +108,30 @@ async function tryWithRetry(label: string, fn: () => Promise<string>): Promise<s
   throw new Error(`${label}: unreachable`);
 }
 
+async function callGemini(systemPrompt: string, userPrompt: string): Promise<string> {
+  const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY! });
+  const resp = await ai.models.generateContent({
+    model: GEMINI_MODEL,
+    contents: userPrompt,
+    config: { systemInstruction: systemPrompt, maxOutputTokens: 8000 },
+  });
+  const text = resp.text;
+  if (!text) throw new Error('gemini_no_text');
+  return text;
+}
+
 async function runWithFallback(systemPrompt: string, userPrompt: string): Promise<{ text: string; model: string }> {
+  const geminiEnabled = !!process.env.GEMINI_API_KEY;
+  let geminiErr: unknown = null;
+  if (geminiEnabled) {
+    try {
+      const text = await tryWithRetry('gemini', () => callGemini(systemPrompt, userPrompt));
+      return { text, model: GEMINI_MODEL };
+    } catch (err) {
+      geminiErr = err;
+      console.error('[briefing] gemini exhausted, falling back to claude', err);
+    }
+  }
   try {
     const text = await tryWithRetry('claude', () => callClaude(systemPrompt, userPrompt));
     return { text, model: ANTHROPIC_MODEL };
@@ -116,7 +141,8 @@ async function runWithFallback(systemPrompt: string, userPrompt: string): Promis
       const text = await tryWithRetry('openai', () => callOpenAI(systemPrompt, userPrompt));
       return { text, model: OPENAI_MODEL };
     } catch (openaiErr) {
-      throw new ProviderError(`claude: ${(claudeErr as Error)?.message ?? 'unknown'} | openai: ${(openaiErr as Error)?.message ?? 'unknown'}`);
+      const geminiMsg = geminiEnabled ? `gemini: ${(geminiErr as Error)?.message ?? 'unknown'} | ` : '';
+      throw new ProviderError(`${geminiMsg}claude: ${(claudeErr as Error)?.message ?? 'unknown'} | openai: ${(openaiErr as Error)?.message ?? 'unknown'}`);
     }
   }
 }

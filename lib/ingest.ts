@@ -16,10 +16,12 @@
 import { SupabaseClient } from '@supabase/supabase-js';
 import Anthropic from '@anthropic-ai/sdk';
 import OpenAI from 'openai';
+import { GoogleGenAI } from '@google/genai';
 
 // ─── Configuration ────────────────────────────────────────────────────────────
 const ANTHROPIC_MODEL = 'claude-opus-4-5';
 const OPENAI_MODEL = 'gpt-4o';
+const GEMINI_MODEL = 'gemini-3-pro';
 
 // ─── Public types ─────────────────────────────────────────────────────────────
 
@@ -389,10 +391,41 @@ async function callOpenAI(systemPrompt: string, userPrompt: string): Promise<str
   return text;
 }
 
+async function callGemini(systemPrompt: string, userPrompt: string): Promise<string> {
+  const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY! });
+  const resp = await ai.models.generateContent({
+    model: GEMINI_MODEL,
+    contents: userPrompt,
+    config: {
+      systemInstruction: systemPrompt,
+      maxOutputTokens: 8000,
+    },
+  });
+  const text = resp.text;
+  if (!text) throw new Error('gemini_no_text');
+  return text;
+}
+
 export async function runAnalysisWithFallback(
   systemPrompt: string,
   userPrompt: string,
 ): Promise<{ text: string; model: string }> {
+  // Provider order (2026-05-15): Gemini primary → Claude → OpenAI.
+  // Gemini 3 Pro is ~6x cheaper than Claude Opus at equivalent quality;
+  // the prompts were calibrated against Gemini's case-formulation bar.
+  // Gemini stays opt-in via env var so a missing key falls through to
+  // the original Claude/OpenAI chain without breaking production.
+  const geminiEnabled = !!process.env.GEMINI_API_KEY;
+  let geminiErr: unknown = null;
+  if (geminiEnabled) {
+    try {
+      const text = await tryProviderWithRetry('gemini', () => callGemini(systemPrompt, userPrompt));
+      return { text, model: GEMINI_MODEL };
+    } catch (err) {
+      geminiErr = err;
+      console.error('[ingest] gemini exhausted, falling back to claude', err);
+    }
+  }
   try {
     const text = await tryProviderWithRetry('claude', () => callClaude(systemPrompt, userPrompt));
     return { text, model: ANTHROPIC_MODEL };
@@ -402,9 +435,10 @@ export async function runAnalysisWithFallback(
       const text = await tryProviderWithRetry('openai', () => callOpenAI(systemPrompt, userPrompt));
       return { text, model: OPENAI_MODEL };
     } catch (openaiErr) {
+      const geminiMsg = geminiEnabled ? `gemini: ${(geminiErr as Error)?.message ?? 'unknown'} | ` : '';
       const claudeMsg = (claudeErr as Error)?.message ?? 'unknown';
       const openaiMsg = (openaiErr as Error)?.message ?? 'unknown';
-      throw new ProviderError(`claude: ${claudeMsg} | openai: ${openaiMsg}`);
+      throw new ProviderError(`${geminiMsg}claude: ${claudeMsg} | openai: ${openaiMsg}`);
     }
   }
 }
